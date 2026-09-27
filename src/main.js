@@ -1548,9 +1548,9 @@ function viewCloud() {
     return `
     <div class="card">
       <b>Buat Admin Pertama</b>
-      <p class="hint">Database cloud masih kosong. Isi kode setup (SETUP_TOKEN yang dibuat saat deploy Worker) untuk membuat akun admin. Setelah itu admin menambahkan auditor dari tab ini.</p>
+      <p class="hint">Database cloud masih kosong. Isi <b>kode setup</b> = nilai rahasia yang Anda ketik di kolom <i>Value</i> saat membuat secret <code>SETUP_TOKEN</code> di Worker Cloudflare (bukan tulisan "SETUP_TOKEN"). Setelah admin dibuat, admin menambahkan auditor dari tab ini.</p>
       <form id="setupForm" autocomplete="on">
-        <div class="field"><label>Kode setup</label><input name="setupToken" required autocomplete="off"></div>
+        <div class="field"><label>Kode setup</label><input name="setupToken" required autocomplete="off" placeholder="nilai rahasia SETUP_TOKEN"></div>
         <div class="field"><label>Nama</label><input name="nama"></div>
         <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
         <div class="field"><label>Password (min. 8 karakter)</label><input name="password" type="password" autocomplete="new-password" minlength="8" required></div>
