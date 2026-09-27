@@ -14,6 +14,7 @@ import { loadAll, scheduleSave, flushSave, flushAll, deleteAudit } from './lib/s
 import { captureStampedPhoto, formatStampTime, verifyPhoto } from './lib/camera.js'
 import { thumbSrc, fullUrl, storeNewPhoto, removePhotoFiles, migrateAuditPhotos, photoLists, photoBlob } from './lib/photos.js'
 import { buildReport, fmtPct, fmtSkor } from './lib/report.js'
+import { LOGO_MARK, APP_NAME } from './assets/logo-mark.js'
 
 /* =========================================================
    STATE
@@ -50,7 +51,7 @@ function defaultInfo() {
     tipeKepemilikan: 'COCO', tahun: new Date().getFullYear().toString(), telepon: '',
     tanggalAudit: new Date().toISOString().slice(0, 10), tipeAudit: '', kelasTarget: 'good',
     auditors: [''],
-    operators: { S1: '', S2: '', S3: '', NS: '', MD: '', OFF: '' },
+    operators: { S1: '', S2: '', S3: '', OFF: '' },
     shiftAudit: [],
     nozzles: [],
     umkTahunIni: '', upahOperator: '', hariKerja: '', bpjs: '',
@@ -68,7 +69,11 @@ function normalizeAudit(a) {
   if (!Array.isArray(i.auditors) || !i.auditors.length) i.auditors = [i.koordinator || '']
   delete i.koordinator
   // v2 → v3: operatorShift1..3 → operators per kategori shift
-  i.operators = { S1: '', S2: '', S3: '', NS: '', MD: '', OFF: '', ...(i.operators || {}) }
+  i.operators = { S1: '', S2: '', S3: '', OFF: '', ...(i.operators || {}) }
+  // Kategori NS (Normal Shift) & MD (Middle Shift) dihapus
+  delete i.operators.NS
+  delete i.operators.MD
+  if (Array.isArray(i.shiftAudit)) i.shiftAudit = i.shiftAudit.filter((id) => !['NS', 'MD'].includes(id))
   ;[['operatorShift1', 'S1'], ['operatorShift2', 'S2'], ['operatorShift3', 'S3']].forEach(([old, id]) => {
     if (i[old] !== undefined) { if (!i.operators[id]) i.operators[id] = i[old]; delete i[old] }
   })
@@ -190,6 +195,34 @@ function go(view, params) {
   if (params && params.auditId) currentAuditId = params.auditId
   render()
   window.scrollTo(0, 0)
+  // Animasi masuk bertahap (stagger) tiap pindah halaman
+  const c = contentEl()
+  c.classList.remove('view-enter')
+  void c.offsetWidth
+  c.classList.add('view-enter')
+  clearTimeout(go._t)
+  go._t = setTimeout(() => c.classList.remove('view-enter'), 900)
+}
+
+/** Efek pegas singkat pada elemen (nilai dipilih, chip, dsb). */
+function springPop(el) {
+  el.classList.remove('pop')
+  void el.offsetWidth
+  el.classList.add('pop')
+}
+
+/** Riak (ripple) di titik sentuh untuk tombol-tombol utama. */
+const RIPPLE_SEL = '.btn-primary,.btn-secondary,.btn-ghost,.btn-mini,.submit-btn,.photo-btn,.tab,.choice-chip,.submit-data,.report-fab,.cam-btn,.elem-header,.pin-card,.card.tap'
+function addRipple(ev) {
+  const host = ev.target.closest && ev.target.closest(RIPPLE_SEL)
+  if (!host || host.disabled) return
+  const r = host.getBoundingClientRect()
+  const d = Math.max(r.width, r.height) * 1.2
+  const sp = document.createElement('span')
+  sp.className = 'ripple'
+  sp.style.cssText = `width:${d}px;height:${d}px;left:${ev.clientX - r.left - d / 2}px;top:${ev.clientY - r.top - d / 2}px`
+  host.appendChild(sp)
+  setTimeout(() => sp.remove(), 600)
 }
 
 function render() {
@@ -199,7 +232,7 @@ function render() {
   if (landing) {
     document.getElementById('tabbar').innerHTML = ''
     document.getElementById('topbar').innerHTML = ''
-    c.innerHTML = cloud.ready ? viewLanding() : `<div class="landing-splash"><div class="brand-mark">PW</div><div class="spinner"></div></div>`
+    c.innerHTML = cloud.ready ? viewLanding() : `<div class="landing-splash"><div class="brand-logo">${LOGO_MARK}</div><div class="spinner"></div></div>`
     return
   }
   renderTabbar()
@@ -228,7 +261,7 @@ function renderTabbar() {
 
 function renderTopbar() {
   const tb = document.getElementById('topbar')
-  if (currentView === 'home') { tb.innerHTML = `<h1 style="text-align:left;flex:1;">Audit Pertamina Way</h1>`; return }
+  if (currentView === 'home') { tb.innerHTML = `<div class="top-brand">${LOGO_MARK}<h1>${APP_NAME}</h1></div>`; return }
   if (currentView === 'history') { tb.innerHTML = `<h1 style="text-align:left;flex:1;">Riwayat Audit</h1>`; return }
   if (currentView === 'about') { tb.innerHTML = `<h1 style="text-align:left;flex:1;">Panduan</h1>`; return }
   if (currentView === 'account') { tb.innerHTML = `<h1 style="text-align:left;flex:1;">Akun &amp; Rekap</h1>`; return }
@@ -238,7 +271,7 @@ function renderTopbar() {
   }
   if (currentView === 'checklist') {
     const a = curAudit()
-    tb.innerHTML = `<button class="back" data-back="form">&#8249;</button><h1>${esc(a.info.nomorSpbu || 'Checklist')}</h1><button class="action" data-action="goreport">Laporan</button>`
+    tb.innerHTML = `<button class="back" data-back="form">&#8249;</button><h1>${esc(a.info.nomorSpbu || 'Checklist')}</h1><span id="submitDataSlot">${submitDataBtnHtml()}</span>`
     return
   }
   if (currentView === 'report') {
@@ -270,11 +303,13 @@ function viewHome() {
   const draftHtml = list.length ? list.map(auditRow).join('')
     : `<div class="card" style="text-align:center;color:var(--muted);padding:24px;">Belum ada audit. Mulai audit baru untuk SPBU Anda.</div>`
   return `
-  <div class="hero">
-    <h1>Audit Pertamina Way</h1>
+  <div class="hero hero-brand">
+    <div class="hero-logo">${LOGO_MARK}</div>
+    <div><h1>${APP_NAME}</h1>
     <p>Checklist Pasti Pas &middot; foto ber-timestamp &amp; kode verifikasi &middot; skor real-time</p>
-    <div class="cloud-line" data-tab="account">${cloudLineHtml()}</div>
+    </div>
   </div>
+  <div class="cloud-line" data-tab="account">${cloudLineHtml()}</div>
   <button class="btn-primary" data-action="newaudit" style="margin-bottom:18px;">+ Mulai Audit SPBU Baru</button>
 
   <div class="section-title">Audit Terakhir</div>
@@ -393,7 +428,7 @@ function viewForm() {
     </div>
     <div class="calc-sec" style="margin-top:4px">Shift bertugas saat audit</div>
     <div class="chip-row">
-      ${SHIFTS.filter((sh) => sh.id !== 'OFF').map((sh) => `<button class="choice-chip ${i.shiftAudit.includes(sh.id) ? 'on' : ''}" data-shiftaudit="${sh.id}">${sh.id === 'NS' || sh.id === 'MD' ? sh.id : sh.label}</button>`).join('')}
+      ${SHIFTS.filter((sh) => sh.id !== 'OFF').map((sh) => `<button class="choice-chip ${i.shiftAudit.includes(sh.id) ? 'on' : ''}" data-shiftaudit="${sh.id}">${sh.label}</button>`).join('')}
     </div>
     <div id="opSummary">${operatorSummaryHtml(a)}</div>
   </div>
@@ -825,6 +860,12 @@ function patchProgress() {
   if (pd) pd.innerHTML = pinaltiDashHtml()
   const fab = document.getElementById('reportFab')
   if (fab) fab.innerHTML = reportFabHtml()
+  const sd = document.getElementById('submitDataSlot')
+  if (sd) {
+    const prev = sd.firstElementChild && sd.firstElementChild.className
+    sd.innerHTML = submitDataBtnHtml()
+    if (prev && prev !== sd.firstElementChild.className) sd.firstElementChild.classList.add('pop')
+  }
 }
 
 /** Terapkan nilai otomatis (density / tera / tenant) bila hasil perhitungan tersedia. */
@@ -1036,16 +1077,58 @@ function editItem(code) {
   showToast(`Item ${code} dapat diubah — tekan Submit lagi setelah selesai`, 2600)
 }
 
-/* ----- Submit laporan ----- */
+/* ----- Submit data (laporan) ----- */
+const iconFingerprint = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .131-5.354 0-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/></svg>`
+const iconUpload = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="m7 9 5-5 5 5"/><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>`
+const iconCheck = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>`
+
+/** Status tombol Submit Data: 'todo' (masih ada item) | 'ready' (siap kirim) | 'done' (sudah terkirim). */
+function submitState(a) {
+  const comp = computeAudit(a)
+  const left = comp.totalItems - comp.totalSubmitted
+  if (left > 0) return { state: 'todo', left }
+  return { state: a.status === 'selesai' ? 'done' : 'ready', left: 0 }
+}
+
+function submitDataBtnHtml() {
+  const a = curAudit()
+  if (!a) return ''
+  const { state, left } = submitState(a)
+  const icon = state === 'done' ? iconCheck : state === 'ready' ? iconFingerprint : iconUpload
+  const title = state === 'done' ? 'Data sudah disubmit — lihat laporan' : state === 'ready' ? 'Semua item lengkap — submit data' : `${left} item belum disubmit`
+  return `<button class="submit-data ${state}" data-action="submitdata" title="${title}" aria-label="${title}">
+    <span class="sd-ico">${icon}</span><span class="sd-label">Submit Data</span>${state === 'todo' ? `<em class="sd-count">${left}</em>` : ''}</button>`
+}
+
 function reportFabHtml() {
   const a = curAudit()
   if (!a) return ''
-  const comp = computeAudit(a)
-  if (comp.totalSubmitted < comp.totalItems) return ''
-  if (a.status === 'selesai') {
-    return `<button class="report-fab done" data-action="goreport"><span class="fab-ico">✓</span> Laporan tersubmit · Lihat</button>`
+  const { state } = submitState(a)
+  if (state === 'todo') return ''
+  if (state === 'done') {
+    return `<button class="report-fab done" data-action="submitdata"><span class="fab-ico">${iconCheck}</span> Data tersubmit · Lihat Laporan</button>`
   }
-  return `<button class="report-fab" data-action="submitreport"><span class="fab-ico">➤</span> Submit Laporan</button>`
+  return `<button class="report-fab" data-action="submitdata"><span class="fab-ico">${iconFingerprint}</span> Submit Data</button>`
+}
+
+function jumpToItem(code) {
+  const it = ITEM_BY_CODE[code]
+  if (!it) return
+  searchQuery = ''; pinaltiFilter = null; currentElementOpen = it.elCode
+  render()
+  const card = document.getElementById('item-' + it.code.replace(/\./g, '_'))
+  if (card) { card.scrollIntoView({ block: 'center', behavior: 'smooth' }); card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 1600) }
+}
+
+/** Klik tombol Submit Data: arahkan ke item berikutnya, jalankan submit, atau buka laporan. */
+function onSubmitData() {
+  const a = curAudit()
+  const { state, left } = submitState(a)
+  if (state === 'done') { go('report', { auditId: a.id }); return }
+  if (state === 'ready') { submitReport(); return }
+  const next = ALL_ITEMS.find((it) => !getResult(a, it.code).submittedAt)
+  showToast(`Masih ${left} item belum disubmit — menuju ${next.code}`, 2600)
+  jumpToItem(next.code)
 }
 
 function reportNumber(a) {
@@ -1057,39 +1140,71 @@ async function submitReport() {
   const a = curAudit()
   const comp = computeAudit(a)
   if (comp.totalSubmitted < comp.totalItems) { showToast('Masih ada item yang belum disubmit'); return }
-  const steps = ['Memeriksa 125 item checklist', 'Menghitung Total Score & klasifikasi', 'Memvalidasi item pinalti', cloud.role ? 'Menyimpan ke cloud' : 'Menyimpan di perangkat']
   const root = document.getElementById('modalRoot')
-  root.innerHTML = `<div class="submit-overlay" role="alertdialog" aria-live="polite" aria-label="Mengirim laporan">
-    <div class="submit-card">
-      <div class="submit-ring"><svg viewBox="0 0 100 100"><circle class="track" cx="50" cy="50" r="44"/><circle class="bar" cx="50" cy="50" r="44"/></svg><div class="submit-check">✓</div></div>
-      <div class="submit-title">Mengirim Laporan…</div>
-      <ul class="submit-steps">${steps.map((t, k) => `<li data-step="${k}"><span class="dot"></span>${esc(t)}</li>`).join('')}</ul>
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+  const steps = ['Memeriksa 125 item checklist', 'Menghitung Total Score & klasifikasi', 'Memvalidasi item pinalti', cloud.role ? 'Menyimpan & sinkron ke cloud' : 'Menyimpan di perangkat']
+
+  // 1) Verifikasi sidik jari (motion referensi Stitch SPBU)
+  root.innerHTML = `<div class="submit-overlay" role="alertdialog" aria-live="polite" aria-label="Submit data">
+    <div class="bio-card" data-stage="scan">
+      <div class="bio-ring"><span class="rip"></span><span class="rip r2"></span>
+        <div class="bio-ico">${iconFingerprint}<span class="scanline"></span></div>
+        <div class="bio-ok">${iconCheck}</div>
+      </div>
+      <div class="bio-title">Verifikasi Auditor</div>
+      <div class="bio-sub">${esc(currentUserName() || 'Auditor')} &middot; SPBU ${esc(a.info.nomorSpbu || '-')}</div>
     </div>
   </div>`
   const overlay = root.querySelector('.submit-overlay')
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms))
-  const mark = (k, st) => { const li = overlay.querySelector(`[data-step="${k}"]`); if (li) li.className = st }
+  const bio = overlay.querySelector('.bio-card')
   try {
-    mark(0, 'run'); await wait(550); mark(0, 'ok')
-    mark(1, 'run'); await wait(550); mark(1, 'ok')
-    mark(2, 'run'); await wait(450); mark(2, comp.failedPinalti.length ? 'warn' : 'ok')
+    await wait(1100)
+    bio.dataset.stage = 'ok'
+    if (navigator.vibrate) navigator.vibrate(18)
+    await wait(650)
+
+    // 2) Pop-up proses data
+    bio.outerHTML = `<div class="submit-card">
+      <div class="submit-ring"><svg viewBox="0 0 100 100"><circle class="track" cx="50" cy="50" r="44"/><circle class="bar" cx="50" cy="50" r="44"/></svg><div class="submit-check">${iconCheck}</div></div>
+      <div class="submit-title">Memproses Data…</div>
+      <ul class="submit-steps">${steps.map((t, k) => `<li data-step="${k}"><span class="dot"></span>${esc(t)}</li>`).join('')}</ul>
+    </div>`
+    const mark = (k, st) => { const li = overlay.querySelector(`[data-step="${k}"]`); if (li) li.className = st }
+    mark(0, 'run'); await wait(500); mark(0, 'ok')
+    mark(1, 'run'); await wait(500); mark(1, 'ok')
+    mark(2, 'run'); await wait(420); mark(2, comp.failedPinalti.length ? 'warn' : 'ok')
     mark(3, 'run')
     a.status = 'selesai'
     a.reportSubmittedAt = Date.now()
     a.reportNo = a.reportNo || reportNumber(a)
     persist(a.id)
     await flushSave(a)
-    if (cloud.role && navigator.onLine) await syncNow().catch(() => {})
-    await wait(400)
-    mark(3, 'ok')
+    let synced = false
+    if (cloud.role && navigator.onLine) { await syncNow(); synced = !needsSync(a) }
+    await wait(350)
+    mark(3, synced || !cloud.role ? 'ok' : 'warn')
     overlay.classList.add('done')
-    overlay.querySelector('.submit-title').textContent = 'Laporan Tersubmit'
-    await wait(1100)
-    closeModal()
-    go('report', { auditId: a.id })
+    overlay.querySelector('.submit-title').textContent = 'Proses Selesai'
+    await wait(900)
+
+    // 3) Pop-up selesai + unduh PDF
+    const badge = classificationBadge(comp.classification)
+    const card = overlay.querySelector('.submit-card')
+    card.outerHTML = `<div class="done-card">
+      <div class="done-ico">${iconCheck}</div>
+      <h3>Data Tersubmit!</h3>
+      <p>Laporan audit SPBU ${esc(a.info.nomorSpbu || '-')} tersimpan${synced ? ' dan tersinkron ke cloud' : cloud.role ? ' di perangkat (sinkron otomatis saat online)' : ''}.</p>
+      <div class="done-meta">
+        <div><span>NO. REPORT</span><b>${esc(a.reportNo)}</b></div>
+        <div><span>TOTAL SCORE</span><b>${comp.ts.toFixed(2)}</b></div>
+        <div><span>HASIL</span><b style="color:${{ excellent: '#0050CB', good: '#047857' }[comp.classification] || '#BA1A1A'}">${esc(badge.text)}</b></div>
+      </div>
+      <button class="btn-primary done-pdf" data-action="donepdf">${iconUpload.replace('M12 15V4', 'M12 4v11').replace('m7 9 5-5 5 5', 'm7 10 5 5 5-5')} Unduh Laporan PDF</button>
+      <button class="btn-secondary" data-action="doneview">Lihat Laporan</button>
+    </div>`
   } catch (e) {
     closeModal()
-    showToast('Gagal submit laporan: ' + e.message, 4000)
+    showToast('Gagal submit data: ' + e.message, 4000)
   }
 }
 
@@ -1309,7 +1424,7 @@ function viewAbout() {
   <div class="card">
     <b>Cara Menggunakan</b>
     <ol style="font-size:14px;line-height:1.7;padding-left:18px;">
-      <li>Tekan <b>+ Mulai Audit SPBU Baru</b>, isi data SPBU, <b>auditor</b> (boleh lebih dari satu), <b>jumlah operator per shift</b> (Shift 1–3, NS, MD, OFF) dan <b>shift yang bertugas saat audit</b>.</li>
+      <li>Tekan <b>+ Mulai Audit SPBU Baru</b>, isi data SPBU, <b>auditor</b> (boleh lebih dari satu), <b>jumlah operator per shift</b> (Shift 1–3 &amp; OFF) dan <b>shift yang bertugas saat audit</b>.</li>
       <li>Isi <b>jumlah nozzle</b> &rarr; tekan <b>Submit</b> &rarr; pilih nomor &amp; produk tiap nozzle.</li>
       <li>Periksa <b>Dashboard Item Pinalti</b> lebih dahulu bila perlu, atau langsung buka checklist lengkap.</li>
       <li>Gunakan kolom <b>Cari</b> (cth. “APAR”) untuk menemukan item sesuai area yang sedang diperiksa.</li>
@@ -1700,9 +1815,9 @@ function viewLanding() {
   return `
   <div class="landing">
     <div class="landing-hero">
-      <div class="brand-mark">PW</div>
-      <h1>Audit Pertamina Way</h1>
-      <p>Task Force Region VI Jatimbalinus</p>
+      <div class="brand-logo">${LOGO_MARK}</div>
+      <div class="wordmark"><span class="wm-top">TASK F<b class="wm-o">O</b>RCE</span><span class="wm-pill">AUDIT SPBU<i></i><i></i><i></i></span></div>
+      <p>Region VI Jatimbalinus &middot; Pertamina Way</p>
       <ul class="landing-feats">
         <li><span>125</span>item checklist Pasti Pas</li>
         <li><span>A4</span>laporan PDF siap kirim</li>
@@ -1853,7 +1968,9 @@ function onClick(ev) {
       resizeNozzles(n)
       showToast(`✓ ${n} nozzle — pilih nomor & produk tiap nozzle`)
     }
-    else if (action === 'submitreport') submitReport()
+    else if (action === 'submitdata') onSubmitData()
+    else if (action === 'donepdf') { closeModal(); go('report', { auditId: currentAuditId }); exportPDF() }
+    else if (action === 'doneview') { closeModal(); go('report', { auditId: currentAuditId }) }
     else if (action === 'deleteaudit') {
       if (confirm('Hapus audit ini beserta seluruh data & foto?')) {
         const id = currentAuditId
@@ -1904,14 +2021,7 @@ function onClick(ev) {
   }
 
   const jump = t.closest('[data-jump]')
-  if (jump) {
-    const it = ITEM_BY_CODE[jump.dataset.jump]
-    searchQuery = ''; pinaltiFilter = null; currentElementOpen = it.elCode
-    render()
-    const card = document.getElementById('item-' + it.code.replace(/\./g, '_'))
-    if (card) { card.scrollIntoView({ block: 'center' }); card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 1600) }
-    return
-  }
+  if (jump) { jumpToItem(jump.dataset.jump); return }
 
   const viewPhoto = t.closest('[data-viewphoto]')
   if (viewPhoto) { openPhotoViewer(viewPhoto.dataset.viewphoto); return }
@@ -1934,6 +2044,7 @@ function onClick(ev) {
     if (k >= 0) list.splice(k, 1); else list.push(id)
     persist(a.id)
     shiftChip.classList.toggle('on', k < 0)
+    springPop(shiftChip)
     const sum = document.getElementById('opSummary')
     if (sum) sum.innerHTML = operatorSummaryHtml(a)
     return
@@ -1960,6 +2071,8 @@ function onClick(ev) {
     const r = getResult(curAudit(), code)
     setResult(code, { grade: r.grade === g ? null : g })
     patchItem(code)
+    const sel = document.querySelector(`[data-code="${code}"][data-grade="${g}"]`)
+    if (sel && r.grade !== g) springPop(sel)
     return
   }
 
@@ -2185,6 +2298,7 @@ async function init() {
     }
   }, true)
   document.getElementById('modalRoot').addEventListener('click', onClick)
+  document.addEventListener('pointerdown', addRipple, { passive: true })
   app.addEventListener('submit', (ev) => {
     const id = ev.target.id
     if (['loginForm', 'setupForm', 'apiForm', 'pwForm'].includes(id)) ev.preventDefault()

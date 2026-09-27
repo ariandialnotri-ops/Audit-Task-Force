@@ -1,4 +1,4 @@
-# Audit Pertamina Way
+# Task Force Audit SPBU — Audit Pertamina Way
 
 Aplikasi mobile-web untuk audit SPBU Pertamina Way (Pasti Pas Good/Excellent). Auditor mengisi checklist per item, memberi nilai A–F/N/A, memotret bukti langsung dari kamera, dan mendapatkan skor + klasifikasi otomatis serta laporan hasil audit yang bisa diunduh sebagai PDF.
 
@@ -47,9 +47,16 @@ Gaya visual mengikuti design system **AeroShift SPBU** (lihat `DESIGN.md`) — i
 
 ## Fitur
 
+**Baru di v3.1**
+- Nama aplikasi **Task Force Audit SPBU** + logo vektor (perisai, kanopi SPBU, dispenser, checklist, swoosh merah-biru-hijau) di landing page, beranda, topbar & favicon.
+- Kategori operator disederhanakan: **Shift 1, Shift 2, Shift 3, OFF** (NS & MD dihapus; data lama dibersihkan otomatis).
+- Tombol topbar **Submit Data** menggantikan "Laporan", warna ikon dinamis: kuning + jumlah item tersisa (ketuk → lompat ke item berikutnya yang belum disubmit), biru bernapas dengan ikon sidik jari saat siap, hijau ✓ setelah terkirim (ketuk → buka laporan).
+- Alur submit mengikuti referensi Stitch SPBU: **animasi sidik jari** (garis pindai + riak) → centang hijau → pop-up proses data bertahap → pop-up **Data Tersubmit!** (No. Report, Total Score, hasil) dengan tombol **Unduh Laporan PDF** / Lihat Laporan.
+- Motion: efek tekan pegas & riak (ripple) di tombol, pop saat memilih nilai/shift, konten masuk bertahap tiap pindah halaman, toast meluncur; menghormati *reduce motion*.
+
 **Baru di v3**
 - **Auditor** (menggantikan Koordinator), boleh lebih dari satu (Auditor 1, 2, …).
-- **Data operator per kategori shift**: Shift 1/2/3, **NS** (Normal Shift), **MD** (Middle Shift), **OFF**. Pilih shift yang bertugas saat audit → total sampel item operator (1.1.1.a/b/d, 1.1.2.a, 1.2.a–h) terisi otomatis; auditor cukup mengisi jumlah operator yang sesuai. Bila ada yang tidak sesuai, wajib mengisi **nama operator** tersebut (masuk ke Komentar Auditor).
+- **Data operator per kategori shift**: Shift 1/2/3 dan **OFF** (v3.1). Pilih shift yang bertugas saat audit → total sampel item operator (1.1.1.a/b/d, 1.1.2.a, 1.2.a–h) terisi otomatis; auditor cukup mengisi jumlah operator yang sesuai. Bila ada yang tidak sesuai, wajib mengisi **nama operator** tersebut (masuk ke Komentar Auditor).
 - **Jumlah nozzle + tombol Submit** → baris nozzle muncul dengan **dropdown nomor nozzle** (duplikat ditandai).
 - **UMK tahun lalu dihapus** (hanya UMK tahun ini).
 - **Density 2.2.f–2.2.l**: label "Hasil Density", "Hasil density pengiriman terakhir", "Hasil density sampel audit"; isian waktu bongkar dihapus.

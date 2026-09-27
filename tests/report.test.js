@@ -11,7 +11,7 @@ function sampleAudit(extra = {}) {
     id: 'a_test1234', status: 'selesai', reportNo: 'PW/5164116/1234',
     info: {
       nomorSpbu: '5164116', kota: 'Kediri', tanggalAudit: '2026-09-27', kelasTarget: 'good',
-      auditors: ['Ari', 'Budi'], operators: { S1: '4', S2: '3', NS: '2', MD: '', OFF: '5' }, shiftAudit: ['S1', 'NS', 'OFF'],
+      auditors: ['Ari', 'Budi'], operators: { S1: '4', S2: '3', S3: '2', OFF: '5' }, shiftAudit: ['S1', 'S3', 'OFF'],
       nozzles: [{ id: 'n1', nomor: '2', produk: 'Pertalite' }, { id: 'n2', nomor: '1', produk: 'Pertamax' }],
     },
     results: { ...results, '2.2.m': { grade: 'A', tera: { n1: '-20', n2: '12' }, teraMode: { n2: 'M' } } },

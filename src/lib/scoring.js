@@ -54,8 +54,6 @@ export const SHIFTS = [
   { id: 'S1', label: 'Shift 1' },
   { id: 'S2', label: 'Shift 2' },
   { id: 'S3', label: 'Shift 3' },
-  { id: 'NS', label: 'NS · Normal Shift' },
-  { id: 'MD', label: 'MD · Middle Shift' },
   { id: 'OFF', label: 'OFF Shift' },
 ]
 

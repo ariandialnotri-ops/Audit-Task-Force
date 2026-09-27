@@ -320,7 +320,7 @@ function drawFooters(doc, R, verifyCode) {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(7)
     doc.setTextColor(110, 110, 110)
-    doc.text(pdfText(`Audit Pertamina Way · No. Report ${R.reportNo}`), M, PAGE_H - M - 1)
+    doc.text(pdfText(`Task Force Audit SPBU · No. Report ${R.reportNo}`), M, PAGE_H - M - 1)
     doc.text(pdfText(`Kode verifikasi laporan: ${verifyCode}`), PAGE_W / 2, PAGE_H - M - 1, { align: 'center' })
     doc.text(`Hal ${p} / ${total}`, PAGE_W - M, PAGE_H - M - 1, { align: 'right' })
     doc.setTextColor(0, 0, 0)
@@ -339,7 +339,7 @@ async function sha256Short(text) {
  */
 export async function createReportPdf(R, { loadPhoto = null, includePhotos = true } = {}) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
-  doc.setProperties({ title: `${R.title} ${R.reportNo}`, subject: 'Laporan Audit Pertamina Way', creator: 'Audit Pertamina Way' })
+  doc.setProperties({ title: `${R.title} ${R.reportNo}`, subject: 'Laporan Audit Pertamina Way', creator: 'Task Force Audit SPBU' })
   const state = { doc, y: TOP, splitGroups: [] }
   drawTitle(state, R)
   drawSummary(state, R)

@@ -1,4 +1,4 @@
-# CLAUDE.md — Audit Pertamina Way
+# CLAUDE.md — Task Force Audit SPBU (Audit Pertamina Way)
 
 Konteks proyek ini untuk Claude Code. Baca file ini sebelum mengerjakan perubahan.
 
@@ -21,6 +21,8 @@ Aplikasi audit SPBU Pertamina Way (standar "Pasti Pas"). Auditor mengisi checkli
 - `src/lib/camera.js` — kamera getUserMedia layar penuh, **tanpa GPS**. Setelah jepret ada pratinjau (Ulangi / Gunakan Foto). Stamp: tanggal-jam, SPBU · item, auditor · kode verifikasi (8 hex dari SHA-256). Metadata foto menyimpan `code`, `sha256` (sidik file) dan `auditor`; `verifyPhoto()` → valid/changed/unknown (`cloudSha256` = salinan terkompres di cloud). Tidak ada input file/galeri.
 - `src/lib/report.js` — `buildReport(audit)`: isi laporan persis struktur Excel referensi `Audit_Pertamina_Way_SPBU_*.xlsx` (Ringkasan, Detail Checklist per kelompok, Komentar Auditor, Pengecekan Q&Q, lampiran foto). Dipakai tampilan Laporan dan PDF.
 - `src/lib/pdf.js` — PDF **A4 vektor** (jsPDF + jspdf-autotable, dimuat dinamis). Aturan: margin 12 mm, setiap blok/kelompok diukur di dokumen sementara lalu dipindah utuh ke halaman baru bila tidak muat (`doc.reportMeta.splitGroups` harus kosong), `rowPageBreak: 'avoid'`, header kolom diulang, footer No. Report + kode verifikasi laporan + halaman. Teks dilewatkan `pdfText()` (font standar WinAnsi).
+- Nama aplikasi **Task Force Audit SPBU**; logo vektor di `src/assets/logo-mark.js` (`LOGO_MARK`, `APP_NAME`) dan `public/favicon.svg` (salinan dengan latar putih).
+- Topbar checklist: tombol **Submit Data** (`submitDataBtnHtml`, status todo/ready/done). Submit: `submitReport()` = animasi sidik jari → pop-up proses → pop-up selesai + unduh PDF.
 - Login wajib: tanpa sesi, `render()` menampilkan landing page (`viewLanding`: login / Buat Admin Pertama / pengaturan server). Tab dock: Beranda, Riwayat, **Akun** (`viewAccount`: sinkron, rekap, anggota, kapasitas, password, keluar), Panduan.
 - Deploy aplikasi web: Cloudflare Workers static assets (`wrangler.jsonc` di root, nama `task-force-audit-app`, header di `public/_headers`) atau Vercel (`vercel.json`). Jangan beri nama `audit-task-force` — itu Worker API.
 
@@ -33,7 +35,7 @@ audit = {
   pinaltiPromptShown: bool,
   info: { nomorSpbu, region, kota, alamat, namaPemilik, areaBusinessHead, tipeKepemilikan, tahun, telepon,
           tanggalAudit, tipeAudit /* kosong default */, auditors: ['nama', ...], kelasTarget: 'good'|'excellent',
-          operators: { S1, S2, S3, NS, MD, OFF },   // jumlah operator per kategori shift
+          operators: { S1, S2, S3, OFF },           // jumlah operator per kategori shift (NS/MD dihapus v3.1)
           shiftAudit: ['S1', 'NS', ...],            // shift yang bertugas saat audit (OFF tidak dihitung)
           nozzles: [{ id, nomor, produk }],         // nomor dipilih dari dropdown setelah Submit jumlah
           umkTahunIni, upahOperator, hariKerja, bpjs, komentarManajer },

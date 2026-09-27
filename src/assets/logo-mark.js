@@ -1,4 +1,8 @@
-<svg viewBox="-4 -8 128 128" xmlns="http://www.w3.org/2000/svg" ><rect x="-4" y="-8" width="128" height="128" rx="28" fill="#fff"/>
+/**
+ * Logo Task Force Audit SPBU (versi vektor): perisai biru, kanopi SPBU merah,
+ * dispenser, clipboard checklist, dan swoosh merah-biru-hijau.
+ */
+export const LOGO_MARK = `<svg class="logo-mark" viewBox="0 0 120 112" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Logo Task Force Audit SPBU">
   <path d="M60 6 104 22v36c0 26-19 42-44 50C35 100 16 84 16 58V22z" fill="#fff" stroke="#1B4DAE" stroke-width="6" stroke-linejoin="round"/>
   <path d="M60 14 96 27v4L60 18 24 31v-4z" fill="#1B4DAE"/>
   <path d="M27 36 84 26l3 11-57 10z" fill="#E32129"/>
@@ -17,4 +21,6 @@
   <path d="M9 44C-6 68 16 96 70 93 36 86 14 72 17 48z" fill="#E32129"/>
   <path d="M16 90c32 22 90 14 104-32-12 26-54 40-104 32z" fill="#1B6FE0"/>
   <path d="M102 34c18 8 20 26 10 40 1-14-2-26-10-40z" fill="#3FAE3A"/>
-</svg>
+</svg>`
+
+export const APP_NAME = 'Task Force Audit SPBU'
