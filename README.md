@@ -51,6 +51,7 @@ Gaya visual mengikuti design system **AeroShift SPBU** (lihat `DESIGN.md`) — i
 - Tema terang tetap (sama dengan aplikasi PANTAS/Pembongkaran BBM) walau HP memakai mode gelap.
 - Tata letak dirapikan: input tanggal tidak lagi menimpa Tipe Audit, topbar/pencarian/progress/dock solid, notifikasi muncul di atas.
 - Logo ber-animasi **morphing** saat tombol Masuk ditekan (logo meleleh jadi blob + cincin merah-biru-hijau berputar, bagian logo berdenyut bertahap; sukses → logo mengecil & menghilang ke aplikasi; gagal → logo bergetar).
+- **Logo resmi** Task Force Audit SPBU (SVG dari Rian) dipakai di landing (logo lengkap + tulisan), beranda & topbar (emblem), favicon dan ikon Home Screen iPhone.
 - Teks tagline beranda dihapus; footer landing: © Task Force Audit SPBU · Created by Ariandi Alnotri.
 
 **Baru di v3.1**

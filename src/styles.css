@@ -580,15 +580,6 @@ body.landing-mode .content{padding-bottom:24px;}
 .hero-brand + .cloud-line{margin:0 4px 14px;}
 .brand-logo{width:104px;height:104px;margin:0 auto 12px;padding:13px;border-radius:30px;background:#fff;box-shadow:0 22px 44px -16px rgba(0,50,140,0.5),inset 0 1px 1px rgba(255,255,255,0.9);animation:floatY 5s ease-in-out infinite;}
 .landing-splash .brand-logo{animation:popIn .5s ease, floatY 5s ease-in-out infinite;}
-.wordmark{display:inline-flex;flex-direction:column;align-items:center;gap:3px;font-family:var(--font-ui);font-style:italic;font-weight:800;letter-spacing:-0.01em;}
-.wm-top{font-size:30px;line-height:32px;color:#1B3F8F;}
-.wm-o{display:inline-block;width:23px;height:23px;margin:0 2px 0 1px;border:4px solid #1B3F8F;border-radius:50%;position:relative;vertical-align:-1px;font-size:0;box-sizing:border-box;}
-.wm-o::after{content:'';position:absolute;left:5px;top:-4px;width:7px;height:14px;border:solid #E32129;border-width:0 4px 4px 0;transform:rotate(40deg);}
-.wm-pill{position:relative;display:inline-flex;align-items:center;gap:3px;font-size:19px;line-height:1;color:#fff;background:linear-gradient(180deg,#1B6FE0,#1B3F8F);padding:6px 12px 6px 16px;border-radius:10px 4px 10px 4px;transform:skewX(-8deg);box-shadow:0 8px 18px -8px rgba(27,63,143,0.7);}
-.wm-pill i{display:inline-block;width:5px;height:20px;margin-left:2px;border-radius:1px;transform:skewX(-14deg);}
-.wm-pill i:nth-of-type(1){background:#E32129;margin-left:8px;}
-.wm-pill i:nth-of-type(2){background:#1B6FE0;border:1px solid rgba(255,255,255,0.6);}
-.wm-pill i:nth-of-type(3){background:#3FAE3A;}
 
 
 /* Tombol Submit Data (topbar) — warna ikon dinamis sesuai status */
@@ -703,7 +694,7 @@ body.landing-mode .content{padding-bottom:24px;}
 .landing.morphing .logo-mark > *{animation:partMorph 1.3s cubic-bezier(.65,0,.35,1) infinite;animation-delay:calc(var(--i,0) * 45ms);}
 .landing.morph-out .brand-logo{animation:logoOut .7s cubic-bezier(.5,0,.2,1) forwards;}
 .landing.morph-out .logo-mark > *{animation:partOut .6s cubic-bezier(.5,0,.2,1) forwards;animation-delay:calc(var(--i,0) * 20ms);}
-.landing.morph-out .landing-card,.landing.morph-out .wordmark,.landing.morph-out .landing-hero p,.landing.morph-out .landing-foot{animation:fadeDown .5s ease forwards;}
+.landing.morph-out .landing-card,.landing.morph-out .landing-hero p,.landing.morph-out .landing-foot{animation:fadeDown .5s ease forwards;}
 .landing.morph-fail .brand-logo{animation:shakeX .5s ease;}
 @keyframes blobMorph{
   0%,100%{border-radius:30px;transform:scale(1);}
@@ -712,8 +703,8 @@ body.landing-mode .content{padding-bottom:24px;}
   75%{border-radius:42% 58% 45% 55% / 55% 45% 55% 45%;transform:scale(.96) rotate(4deg);}}
 @keyframes partMorph{
   0%,100%{transform:none;opacity:1;}
-  35%{transform:scale(.6) rotate(-14deg) translateY(3px);opacity:.5;}
-  65%{transform:scale(1.1) rotate(5deg);opacity:1;}}
+  35%{transform:scale(.78) rotate(-7deg) translateY(2px);opacity:.6;}
+  65%{transform:scale(1.06) rotate(3deg);opacity:1;}}
 @keyframes logoOut{0%{transform:scale(1);}35%{transform:scale(1.14);border-radius:50%;}100%{transform:translateY(-40px) scale(.4);opacity:0;border-radius:50%;}}
 @keyframes partOut{to{transform:scale(0) rotate(90deg);opacity:0;}}
 @keyframes fadeDown{to{opacity:0;transform:translateY(24px);}}
@@ -737,3 +728,11 @@ body.landing-mode .content{padding-bottom:24px;}
 .landing-copy b{color:#1B3F8F;font-weight:800;}
 .landing.morph-out .landing-copy{animation:fadeDown .5s ease forwards;}
 .sticky-progress{bottom:calc(76px + env(safe-area-inset-bottom,0px));padding-bottom:18px;}
+/* Logo resmi (emblem + tulisan) di landing page */
+.brand-logo.full{width:min(250px,68vw);height:auto;aspect-ratio:990/950;padding:16px 18px;border-radius:32px;margin-bottom:14px;}
+.landing-splash .brand-logo.full{width:180px;}
+.logo-full .lt{transform-box:fill-box;transform-origin:center;}
+.landing.morphing .logo-mark .lt{animation:textPulse 1.3s ease-in-out infinite;animation-delay:calc(var(--i,0) * 60ms);}
+@keyframes textPulse{0%,100%{opacity:1;transform:none;}45%{opacity:.35;transform:scale(.92);}}
+.top-brand .logo-mark{width:38px;height:30px;}
+.hero-logo{padding:9px;}

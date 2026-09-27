@@ -14,7 +14,7 @@ import { loadAll, scheduleSave, flushSave, flushAll, deleteAudit } from './lib/s
 import { captureStampedPhoto, formatStampTime, verifyPhoto } from './lib/camera.js'
 import { thumbSrc, fullUrl, storeNewPhoto, removePhotoFiles, migrateAuditPhotos, photoLists, photoBlob } from './lib/photos.js'
 import { buildReport, fmtPct, fmtSkor } from './lib/report.js'
-import { LOGO_MARK, APP_NAME } from './assets/logo-mark.js'
+import { LOGO_MARK, LOGO_FULL, APP_NAME } from './assets/logo-mark.js'
 
 /* =========================================================
    STATE
@@ -207,7 +207,8 @@ function go(view, params) {
 /** Beri indeks urutan ke tiap bagian logo (untuk animasi morph bertahap). */
 function indexLogoParts() {
   document.querySelectorAll('.logo-mark').forEach((svg) => {
-    ;[...svg.children].forEach((el, i) => el.style.setProperty('--i', i))
+    // Logo resmi sudah membawa --i per pita; hanya isi bila belum ada
+    ;[...svg.children].forEach((el, i) => { if (!el.style.getPropertyValue('--i')) el.style.setProperty('--i', i) })
   })
 }
 
@@ -239,7 +240,7 @@ function render() {
   if (landing) {
     document.getElementById('tabbar').innerHTML = ''
     document.getElementById('topbar').innerHTML = ''
-    c.innerHTML = cloud.ready ? viewLanding() : `<div class="landing-splash"><div class="brand-logo">${LOGO_MARK}</div><div class="spinner"></div></div>`
+    c.innerHTML = cloud.ready ? viewLanding() : `<div class="landing-splash"><div class="brand-logo full">${LOGO_FULL}</div><div class="spinner"></div></div>`
     indexLogoParts()
     return
   }
@@ -1836,8 +1837,7 @@ function viewLanding() {
   return `
   <div class="landing">
     <div class="landing-hero">
-      <div class="brand-logo">${LOGO_MARK}</div>
-      <div class="wordmark"><span class="wm-top">TASK F<b class="wm-o">O</b>RCE</span><span class="wm-pill">AUDIT SPBU<i></i><i></i><i></i></span></div>
+      <div class="brand-logo full">${LOGO_FULL}</div>
       <p>Region VI Jatimbalinus &middot; Pertamina Way</p>
     </div>
     <div class="landing-card">
