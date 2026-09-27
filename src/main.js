@@ -9,7 +9,8 @@ import {
 import { DENSITY_TOLERANCE, METHOD_LABEL } from './lib/density.js'
 import { formatDensity, formatSigned, formatNumber, parseAngka } from './lib/format.js'
 import { loadAll, scheduleSave, flushSave, flushAll, deleteAudit } from './lib/storage.js'
-import { requireGps, captureStampedPhoto, formatStampTime, formatCoord, photoSrc } from './lib/camera.js'
+import { requireGps, captureStampedPhoto, formatStampTime, formatCoord } from './lib/camera.js'
+import { thumbSrc, fullUrl, storeNewPhoto, removePhotoFiles, migrateAuditPhotos, photoLists } from './lib/photos.js'
 
 /* =========================================================
    STATE
@@ -21,6 +22,15 @@ let currentElementOpen = null
 let noteOpenSet = new Set()
 let searchQuery = ''
 let pinaltiFilter = null // null | 'all' | elCode
+
+/* Cloud (Supabase) — modul dimuat dinamis setelah tampilan pertama. */
+const cloud = {
+  mod: null, enabled: false, session: null, role: null,
+  status: 'idle', // idle | syncing | error | offline
+  message: '', lastSync: null,
+  remote: null, remoteLoading: false, remoteError: '',
+  members: null, remoteFilter: '',
+}
 
 const contentEl = () => document.getElementById('content')
 
@@ -64,6 +74,7 @@ function persist(id) {
   a.updatedAt = Date.now()
   scheduleSave(a)
   flashSaved()
+  scheduleSync()
 }
 
 function setResult(code, patch) {
@@ -140,6 +151,7 @@ const iconHistory = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 const iconInfo = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5"/><path d="M12 8h.01"/></svg>`
 const iconCamera = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8a2 2 0 0 1 2-2h1.2a1 1 0 0 0 .83-.45L9 4h6l.97 1.55a1 1 0 0 0 .83.45H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8z"/><circle cx="12" cy="13" r="3.2"/></svg>`
 const iconSearch = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>`
+const iconCloud = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.1 9.2 4.5 4.5 0 0 0 7 18z"/></svg>`
 const iconPin = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>`
 
 /* =========================================================
@@ -160,14 +172,16 @@ function render() {
   else if (currentView === 'history') c.innerHTML = viewHistory()
   else if (currentView === 'form') c.innerHTML = viewForm()
   else if (currentView === 'checklist') c.innerHTML = viewChecklist()
-  else if (currentView === 'report') c.innerHTML = viewReport()
+  else if (currentView === 'report') { c.innerHTML = viewReport(); hydrateFullPhotos() }
   else if (currentView === 'about') c.innerHTML = viewAbout()
+  else if (currentView === 'cloud') c.innerHTML = viewCloud()
 }
 
 function renderTabbar() {
   const tabs = [
     { id: 'home', label: 'Beranda', icon: iconHome },
     { id: 'history', label: 'Riwayat', icon: iconHistory },
+    { id: 'cloud', label: 'Cloud', icon: iconCloud },
     { id: 'about', label: 'Panduan', icon: iconInfo },
   ]
   document.getElementById('tabbar').innerHTML = tabs.map((t) => `
@@ -181,6 +195,7 @@ function renderTopbar() {
   if (currentView === 'home') { tb.innerHTML = `<h1 style="text-align:left;flex:1;">Audit Pertamina Way</h1>`; return }
   if (currentView === 'history') { tb.innerHTML = `<h1 style="text-align:left;flex:1;">Riwayat Audit</h1>`; return }
   if (currentView === 'about') { tb.innerHTML = `<h1 style="text-align:left;flex:1;">Panduan</h1>`; return }
+  if (currentView === 'cloud') { tb.innerHTML = `<h1 style="text-align:left;flex:1;">Cloud &amp; Rekap</h1>`; return }
   if (currentView === 'form') {
     tb.innerHTML = `<button class="back" data-back="home">&#8249; Kembali</button><h1>Data SPBU</h1><span style="width:70px"></span>`
     return
@@ -222,6 +237,7 @@ function viewHome() {
   <div class="hero">
     <h1>Audit Pertamina Way</h1>
     <p>Checklist Pasti Pas &middot; foto GPS ber-timestamp &middot; skor real-time</p>
+    <div class="cloud-line" data-tab="cloud">${cloudLineHtml()}</div>
   </div>
   <button class="btn-primary" data-action="newaudit" style="margin-bottom:18px;">+ Mulai Audit SPBU Baru</button>
 
@@ -569,7 +585,7 @@ function tenantOutHtml(a) {
 function thumbsHtml(photos, rmAttr) {
   if (!photos || !photos.length) return ''
   return `<div class="photo-strip">${photos.map((p, idx) => `
-    <div class="photo-thumb"><img src="${photoSrc(p)}" alt=""><button class="rm" ${rmAttr}="${idx}">&times;</button></div>`).join('')}</div>`
+    <div class="photo-thumb"><img src="${thumbSrc(p)}" alt="" loading="lazy"><button class="rm" ${rmAttr}="${idx}">&times;</button></div>`).join('')}</div>`
 }
 
 function tenantBlock(a) {
@@ -868,11 +884,10 @@ async function submitItem(code) {
 async function takePhoto(label) {
   const a = curAudit()
   try {
-    const photo = await captureStampedPhoto({ label, spbu: a.info.nomorSpbu })
-    if (photo) {
-      a.lokasiTerakhir = { lat: photo.lat, lng: photo.lng, acc: photo.acc, ts: photo.ts }
-    }
-    return photo
+    const shot = await captureStampedPhoto({ label, spbu: a.info.nomorSpbu })
+    if (!shot) return null
+    a.lokasiTerakhir = { lat: shot.lat, lng: shot.lng, acc: shot.acc, ts: shot.ts }
+    return await storeNewPhoto(shot)
   } catch (err) {
     showModal(gpsHelpHtml(err))
     return null
@@ -979,7 +994,7 @@ function viewReport() {
   const photoHtml = photoItems.length ? `
     <div class="section-title">Dokumentasi Foto (GPS &amp; timestamp)</div>
     <div class="card"><div class="report-photo-grid">
-      ${photoItems.map(({ p, cap }) => `<div><img src="${photoSrc(p)}"><div class="cap">${esc(cap)}${p && p.ts ? `<br>${esc(formatStampTime(p.ts))}` : ''}</div></div>`).join('')}
+      ${photoItems.map(({ p, cap }) => `<div><img src="${thumbSrc(p)}" data-full="${esc(p.id || '')}"><div class="cap">${esc(cap)}${p && p.ts ? `<br>${esc(formatStampTime(p.ts))}` : ''}</div></div>`).join('')}
     </div></div>` : ''
 
   const umkBlock = (i.umkTahunIni || i.upahOperator) ? `
@@ -1042,6 +1057,21 @@ function viewReport() {
   <button class="btn-secondary" data-action="sharetext">Bagikan Ringkasan (Teks)</button>`
 }
 
+/** Ganti thumbnail di laporan dengan foto ukuran penuh (dimuat dari IndexedDB). */
+function hydrateFullPhotos() {
+  const a = curAudit()
+  const byId = new Map(photoLists(a).flat().filter((p) => p && p.id).map((p) => [p.id, p]))
+  const imgs = [...document.querySelectorAll('#reportContent img[data-full]')]
+  return Promise.all(imgs.map(async (img) => {
+    const p = byId.get(img.dataset.full)
+    if (!p) return
+    const url = await fullUrl(p)
+    if (url && img.src !== url) {
+      await new Promise((res) => { img.onload = res; img.onerror = res; img.src = url })
+    }
+  }))
+}
+
 /* =========================================================
    EXPORT / SHARE
    ========================================================= */
@@ -1075,6 +1105,7 @@ async function exportPDF() {
   const el = document.getElementById('reportContent')
   if (!el) { showToast('Gagal membuat PDF'); return }
   try {
+    await hydrateFullPhotos()
     const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')])
     const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#F5F5F7', useCORS: true })
     const imgData = canvas.toDataURL('image/jpeg', 0.85)
@@ -1154,6 +1185,292 @@ function viewAbout() {
 }
 
 /* =========================================================
+   CLOUD SYNC
+   ========================================================= */
+function needsSync(a) {
+  return !a.syncedAt || a.updatedAt > a.syncedAt
+}
+function pendingCount() {
+  return Object.values(AUDITS).filter(needsSync).length
+}
+
+function summaryFor(a) {
+  const comp = computeAudit(a)
+  return {
+    ts: Math.round(comp.ts * 100) / 100,
+    classification: comp.classification,
+    kelasTarget: a.info.kelasTarget,
+    totalSubmitted: comp.totalSubmitted,
+    totalGraded: comp.totalGraded,
+    totalItems: comp.totalItems,
+    failedPinalti: comp.failedPinalti,
+    areaBusinessHead: a.info.areaBusinessHead || '',
+    auditorEmail: cloud.session ? cloud.session.user.email : '',
+  }
+}
+
+function cloudLineHtml() {
+  if (!cloud.enabled) return ''
+  if (!cloud.session) return `${iconCloud} Data hanya di perangkat ini &middot; <u>login untuk sinkron cloud</u>`
+  if (!cloud.role) return `${iconCloud} Akun belum terdaftar sebagai anggota audit`
+  const pend = pendingCount()
+  if (cloud.status === 'syncing') return `${iconCloud} Menyinkronkan…`
+  if (cloud.status === 'offline') return `${iconCloud} Offline &middot; ${pend} audit menunggu sinkron`
+  if (cloud.status === 'error') return `${iconCloud} <span style="color:var(--status-warning)">Gagal sinkron</span> &middot; ${pend} menunggu`
+  return `${iconCloud} ${pend ? `${pend} audit menunggu sinkron` : 'Semua audit tersinkron ke cloud'}${cloud.lastSync ? ' &middot; ' + fmtTime(cloud.lastSync) : ''}`
+}
+
+function refreshCloudUi() {
+  document.querySelectorAll('.cloud-line').forEach((el) => { el.innerHTML = cloudLineHtml() })
+  if (currentView === 'cloud') {
+    const y = window.scrollY
+    render()
+    window.scrollTo(0, y)
+  }
+}
+
+async function initCloud() {
+  try {
+    cloud.mod = await import('./lib/cloud.js')
+  } catch (e) {
+    console.warn('Modul cloud gagal dimuat', e)
+    return
+  }
+  cloud.enabled = cloud.mod.cloudEnabled
+  if (!cloud.enabled) return
+  cloud.session = await cloud.mod.getSession().catch(() => null)
+  cloud.mod.onAuthChange((session) => {
+    const changed = (session && session.user.id) !== (cloud.session && cloud.session.user.id)
+    cloud.session = session
+    if (changed) refreshRole()
+  })
+  await refreshRole()
+}
+
+async function refreshRole() {
+  cloud.role = null
+  cloud.remote = null
+  cloud.members = null
+  if (cloud.session && navigator.onLine) {
+    try { cloud.role = await cloud.mod.claimRole() } catch (e) { cloud.message = e.message }
+  }
+  refreshCloudUi()
+  if (cloud.role) syncNow()
+}
+
+let syncTimer = null
+let syncRunning = false
+function scheduleSync(delay = 4000) {
+  if (!cloud.role) return
+  clearTimeout(syncTimer)
+  syncTimer = setTimeout(() => syncNow(), delay)
+}
+
+async function syncNow(manual = false) {
+  if (!cloud.role) { if (manual) showToast('Login dulu untuk sinkron'); return }
+  if (!navigator.onLine) { cloud.status = 'offline'; refreshCloudUi(); if (manual) showToast('Tidak ada koneksi internet'); return }
+  if (syncRunning) { scheduleSync(3000); return }
+  syncRunning = true
+  cloud.status = 'syncing'
+  document.querySelectorAll('.cloud-line').forEach((el) => { el.innerHTML = cloudLineHtml() })
+  let count = 0
+  try {
+    for (const a of Object.values(AUDITS)) {
+      if (!needsSync(a)) continue
+      const version = a.updatedAt
+      await cloud.mod.pushAudit(a, summaryFor(a))
+      if (!AUDITS[a.id]) continue
+      a.syncedAt = version
+      scheduleSave(a, 50)
+      count++
+    }
+    cloud.status = 'idle'
+    cloud.lastSync = Date.now()
+    cloud.message = ''
+    if (count) cloud.remote = null
+    if (manual) showToast(count ? `✓ ${count} audit tersinkron ke cloud` : '✓ Semua sudah tersinkron')
+  } catch (e) {
+    console.error(e)
+    cloud.status = navigator.onLine ? 'error' : 'offline'
+    cloud.message = e.message
+    if (manual) showToast('Gagal sinkron: ' + e.message, 4000)
+    scheduleSync(60000)
+  } finally {
+    syncRunning = false
+    refreshCloudUi()
+    if (Object.values(AUDITS).some(needsSync) && cloud.status === 'idle') scheduleSync(2000)
+  }
+}
+
+async function cloudLogin(form) {
+  const email = form.email.value
+  const password = form.password.value
+  const btn = form.querySelector('button')
+  btn.disabled = true
+  btn.textContent = 'Masuk…'
+  try {
+    await cloud.mod.signIn(email, password)
+    cloud.session = await cloud.mod.getSession()
+    await refreshRole()
+    showToast(cloud.role ? `Masuk sebagai ${cloud.role}` : 'Login berhasil, tetapi akun belum terdaftar sebagai anggota audit', 3500)
+  } catch (e) {
+    showToast(e.message, 4000)
+    btn.disabled = false
+    btn.textContent = 'Masuk'
+  }
+}
+
+async function cloudLogout() {
+  if (pendingCount() && !confirm(`${pendingCount()} audit belum tersinkron. Tetap keluar? (data tetap aman di perangkat ini)`)) return
+  await cloud.mod.signOut()
+  cloud.session = null
+  await refreshRole()
+}
+
+async function loadRemote() {
+  if (!cloud.role) return
+  cloud.remoteLoading = true
+  cloud.remoteError = ''
+  refreshCloudUi()
+  try {
+    cloud.remote = await cloud.mod.listRemote()
+    if (cloud.role === 'admin') cloud.members = await cloud.mod.listMembers()
+  } catch (e) {
+    cloud.remoteError = e.message
+  }
+  cloud.remoteLoading = false
+  refreshCloudUi()
+}
+
+async function pullFromCloud(id) {
+  const local = AUDITS[id]
+  if (local && needsSync(local) && !confirm('Audit ini punya perubahan lokal yang belum tersinkron. Timpa dengan versi cloud?')) return
+  showToast('Mengunduh audit…', 10000)
+  try {
+    const audit = normalizeAudit(await cloud.mod.pullAudit(id, (d, t) => showToast(`Mengunduh foto ${d}/${t}…`, 10000)))
+    AUDITS[id] = audit
+    await flushSave(audit)
+    showToast('✓ Audit diunduh ke perangkat')
+    refreshCloudUi()
+  } catch (e) {
+    showToast('Gagal mengunduh: ' + e.message, 4000)
+  }
+}
+
+async function addMemberFromForm() {
+  const email = document.getElementById('mEmail').value
+  const nama = document.getElementById('mNama').value
+  const role = document.getElementById('mRole').value
+  if (!email.trim()) { showToast('Isi email anggota'); return }
+  try {
+    await cloud.mod.addMember(email, nama, role)
+    showToast('✓ Anggota ditambahkan')
+    cloud.members = await cloud.mod.listMembers()
+    refreshCloudUi()
+  } catch (e) {
+    showToast(e.message, 4500)
+  }
+}
+
+async function removeMemberClick(userId) {
+  if (!confirm('Hapus anggota ini dari aplikasi audit?')) return
+  try {
+    await cloud.mod.removeMember(userId)
+    cloud.members = await cloud.mod.listMembers()
+    refreshCloudUi()
+  } catch (e) {
+    showToast(e.message, 4000)
+  }
+}
+
+function remoteListHtml() {
+  const q = cloud.remoteFilter.trim().toLowerCase()
+  const rows = (cloud.remote || []).filter((r) => !q || [r.nomor_spbu, r.kota, r.summary && r.summary.areaBusinessHead, r.summary && r.summary.auditorEmail].join(' ').toLowerCase().includes(q))
+  if (!rows.length) return `<div class="hint" style="padding:10px 4px;">${cloud.remote && cloud.remote.length ? 'Tidak ada yang cocok.' : 'Belum ada audit di cloud.'}</div>`
+  return rows.map((r) => {
+    const sm = r.summary || {}
+    const band = complianceBand((sm.ts || 0) / 100)
+    const local = AUDITS[r.id]
+    const remoteVer = r.client_updated_at ? new Date(r.client_updated_at).getTime() : 0
+    let badge = `<button class="btn-mini" data-pull="${r.id}">Unduh</button>`
+    if (local) {
+      badge = local.updatedAt >= remoteVer
+        ? `<button class="btn-mini ghost" data-open-audit="${r.id}">Buka</button>`
+        : `<button class="btn-mini" data-pull="${r.id}">Perbarui</button>`
+    }
+    return `<div class="remote-row">
+      <div class="audit-badge" style="background:${band.color}22;color:${band.color};">${(sm.ts || 0).toFixed(0)}</div>
+      <div class="meta">
+        <div class="title">${esc(r.nomor_spbu || 'SPBU')} &middot; ${esc(r.kota || '-')}</div>
+        <div class="sub">${esc(r.tanggal_audit || '-')} &middot; ${clsLabel(sm.classification)} &middot; ${sm.totalSubmitted || 0}/${sm.totalItems || 125} submit</div>
+        <div class="sub">${esc(sm.auditorEmail || '')} <span class="pill ${r.status}">${r.status === 'selesai' ? 'Selesai' : 'Draft'}</span></div>
+      </div>
+      ${badge}
+    </div>`
+  }).join('')
+}
+
+function viewCloud() {
+  if (!cloud.mod) return `<div class="empty-state">Memuat modul cloud…</div>`
+  if (!cloud.enabled) return `<div class="card">Sinkronisasi cloud belum dikonfigurasi.</div>`
+  if (!cloud.session) {
+    return `
+    <div class="card">
+      <b>Masuk untuk Sinkronisasi Cloud</b>
+      <p class="hint">Tanpa login, aplikasi tetap bisa dipakai penuh dan data tersimpan di HP ini. Dengan login, setiap audit otomatis tersimpan ke cloud (termasuk foto) dan bisa direkap oleh Area Business Head.</p>
+      <form id="loginForm" autocomplete="on">
+        <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
+        <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
+        <button class="btn-primary" type="submit">Masuk</button>
+      </form>
+      <p class="hint" style="margin-top:10px;">Akun dibuat oleh admin di Supabase Auth (akun yang sama dengan aplikasi PANTAS bisa dipakai), lalu didaftarkan sebagai anggota audit oleh admin.</p>
+    </div>`
+  }
+  const email = esc(cloud.session.user.email)
+  if (!cloud.role) {
+    return `
+    <div class="card">
+      <b>${email}</b>
+      <p class="hint">Akun ini belum terdaftar sebagai anggota aplikasi audit. Minta admin menambahkan email Anda di menu Cloud &rarr; Anggota.${cloud.message ? `<br><span style="color:var(--status-warning)">${esc(cloud.message)}</span>` : ''}</p>
+      <button class="btn-secondary" data-action="logout">Keluar</button>
+    </div>`
+  }
+  if (!cloud.remote && !cloud.remoteLoading && !cloud.remoteError && navigator.onLine) setTimeout(loadRemote, 0)
+  const pend = pendingCount()
+  const membersHtml = cloud.role === 'admin' ? `
+    <div class="section-title">Anggota (admin)</div>
+    <div class="card">
+      ${(cloud.members || []).map((m) => `<div class="link-row"><span class="l">${esc(m.nama || m.email)}<br><small class="hint">${esc(m.email)}</small></span><span class="v">${m.role}${m.user_id !== cloud.session.user.id ? ` <button class="link-danger" data-rmmember="${m.user_id}">hapus</button>` : ''}</span></div>`).join('') || '<p class="hint">Memuat…</p>'}
+      <div class="calc-sec" style="margin-top:12px;">Tambah anggota</div>
+      <div class="field"><label>Email akun (sudah dibuat di Supabase Auth)</label><input id="mEmail" type="email"></div>
+      <div class="field-row">
+        <div class="field"><label>Nama</label><input id="mNama"></div>
+        <div class="field"><label>Peran</label><select id="mRole"><option value="auditor">Auditor</option><option value="admin">Admin</option></select></div>
+      </div>
+      <button class="btn-secondary" data-action="addmember">+ Tambah Anggota</button>
+    </div>` : ''
+  return `
+  <div class="card">
+    <div class="link-row"><span class="l">Akun</span><span class="v">${email}</span></div>
+    <div class="link-row"><span class="l">Peran</span><span class="v">${cloud.role}</span></div>
+    <div class="link-row"><span class="l">Status</span><span class="v">${cloud.status === 'syncing' ? 'Menyinkronkan…' : cloud.status === 'offline' ? 'Offline' : cloud.status === 'error' ? 'Gagal' : 'Siap'}</span></div>
+    <div class="link-row"><span class="l">Menunggu sinkron</span><span class="v">${pend} audit</span></div>
+    <div class="link-row"><span class="l">Sinkron terakhir</span><span class="v">${cloud.lastSync ? fmtDate(cloud.lastSync) + ' ' + fmtTime(cloud.lastSync) : '-'}</span></div>
+    ${cloud.status === 'error' && cloud.message ? `<p class="hint" style="color:var(--status-warning)">${esc(cloud.message)}</p>` : ''}
+    <button class="btn-primary" data-action="syncnow" style="margin-top:10px;">Sinkronkan Sekarang</button>
+    <div style="height:8px"></div>
+    <button class="btn-secondary" data-action="logout">Keluar</button>
+  </div>
+
+  <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;">Rekap Audit Semua SPBU <button class="btn-mini ghost" data-action="loadremote">Muat ulang</button></div>
+  <div class="card">
+    <div class="field" style="margin-bottom:8px;"><input id="remoteFilter" placeholder="Filter SPBU / kota / auditor" value="${esc(cloud.remoteFilter)}"></div>
+    ${cloud.remoteLoading ? '<p class="hint">Memuat…</p>' : cloud.remoteError ? `<p class="hint" style="color:var(--status-warning)">${esc(cloud.remoteError)}</p>` : `<div id="remoteList">${remoteListHtml()}</div>`}
+  </div>
+  ${membersHtml}`
+}
+
+/* =========================================================
    EVENT DELEGATION
    ========================================================= */
 function onClick(ev) {
@@ -1201,8 +1518,14 @@ function onClick(ev) {
     else if (action === 'deleteaudit') {
       if (confirm('Hapus audit ini beserta seluruh data & foto?')) {
         const id = currentAuditId
+        const wasSynced = !!AUDITS[id].syncedAt
+        removePhotoFiles(photoLists(AUDITS[id]).flat()).catch(() => {})
         delete AUDITS[id]
         deleteAudit(id).catch(() => {})
+        if (wasSynced && cloud.role) {
+          cloud.mod.deleteRemote(id).catch((e) => showToast('Audit di cloud tidak terhapus: ' + e.message, 4000))
+          cloud.remote = null
+        }
         go('home')
       }
     }
@@ -1210,6 +1533,10 @@ function onClick(ev) {
     else if (action === 'pdf') exportPDF()
     else if (action === 'finish') { curAudit().status = 'selesai'; persist(currentAuditId); showToast('Audit ditandai selesai'); render() }
     else if (action === 'sharetext') shareTextSummary()
+    else if (action === 'syncnow') syncNow(true)
+    else if (action === 'logout') cloudLogout()
+    else if (action === 'loadremote') loadRemote()
+    else if (action === 'addmember') addMemberFromForm()
     else if (action === 'clearsearch') {
       searchQuery = ''
       const inp = document.getElementById('searchInput')
@@ -1218,6 +1545,11 @@ function onClick(ev) {
     }
     return
   }
+
+  const pull = t.closest('[data-pull]')
+  if (pull) { pullFromCloud(pull.dataset.pull); return }
+  const rmMember = t.closest('[data-rmmember]')
+  if (rmMember) { removeMemberClick(rmMember.dataset.rmmember); return }
 
   const toggle = t.closest('[data-toggle-el]')
   if (toggle) {
@@ -1279,6 +1611,7 @@ function onClick(ev) {
     const idx = parseInt(rmPhoto.dataset.idx, 10)
     if (!confirm('Hapus foto ini?')) return
     const r = getResult(curAudit(), code)
+    removePhotoFiles([(r.photos || [])[idx]]).catch(() => {})
     setResult(code, { photos: (r.photos || []).filter((_, i) => i !== idx) })
     render()
     return
@@ -1296,6 +1629,8 @@ function onClick(ev) {
   if (rmTenant) {
     if (!confirm('Hapus tenant ini beserta fotonya?')) return
     const r = getResult(curAudit(), TENANT_ITEM)
+    const gone = (r.tenants || []).find((x) => x.id === rmTenant.dataset.rmtenant)
+    if (gone) removePhotoFiles([...(gone.fotoTenant || []), ...(gone.fotoIzin || [])]).catch(() => {})
     setResult(TENANT_ITEM, { tenants: (r.tenants || []).filter((x) => x.id !== rmTenant.dataset.rmtenant) })
     applyAutoGrade(TENANT_ITEM)
     render()
@@ -1326,6 +1661,7 @@ function onClick(ev) {
     const tenants = getResult(curAudit(), TENANT_ITEM).tenants || []
     const tenant = tenants.find((x) => x.id === tid)
     if (!tenant) return
+    removePhotoFiles([(tenant[field] || [])[idx]]).catch(() => {})
     tenant[field] = (tenant[field] || []).filter((_, i) => i !== idx)
     setResult(TENANT_ITEM, { tenants })
     applyAutoGrade(TENANT_ITEM)
@@ -1335,6 +1671,13 @@ function onClick(ev) {
 
 function onInput(ev) {
   const t = ev.target
+
+  if (t.id === 'remoteFilter') {
+    cloud.remoteFilter = t.value
+    const box = document.getElementById('remoteList')
+    if (box) box.innerHTML = remoteListHtml()
+    return
+  }
 
   if (t.id === 'searchInput') {
     searchQuery = t.value
@@ -1425,6 +1768,10 @@ async function init() {
   app.addEventListener('input', onInput)
   app.addEventListener('change', onChange)
   document.getElementById('modalRoot').addEventListener('click', onClick)
+  app.addEventListener('submit', (ev) => {
+    if (ev.target.id === 'loginForm') { ev.preventDefault(); cloudLogin(ev.target) }
+  })
+  window.addEventListener('online', () => { if (cloud.status === 'offline') cloud.status = 'idle'; syncNow() })
 
   const flush = () => { flushAll(AUDITS).catch(() => {}) }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush() })
@@ -1438,6 +1785,20 @@ async function init() {
     showToast('Penyimpanan perangkat tidak tersedia: ' + e.message, 5000)
   }
   render()
+  migrateOldPhotos().then(initCloud)
+}
+
+/** Sekali jalan: pindahkan foto format lama (dataURL di dalam audit) ke store foto terpisah. */
+async function migrateOldPhotos() {
+  let any = false
+  for (const a of Object.values(AUDITS)) {
+    try {
+      if (await migrateAuditPhotos(a)) { await flushSave(a); any = true }
+    } catch (e) {
+      console.warn('Migrasi foto gagal', e)
+    }
+  }
+  if (any && !['checklist', 'form'].includes(currentView)) render()
 }
 
 init()

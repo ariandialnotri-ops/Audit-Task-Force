@@ -4,8 +4,9 @@
  * dimigrasikan otomatis sekali saat pertama dibuka.
  */
 const DB_NAME = 'audit-pertamina-way'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const STORE = 'audits'
+const PHOTO_STORE = 'photos'
 const LEGACY_KEY = 'pw_audits_v1'
 
 let dbPromise = null
@@ -17,6 +18,8 @@ function openDb() {
     req.onupgradeneeded = () => {
       const db = req.result
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' })
+      // Foto ukuran penuh disimpan terpisah (Blob) supaya autosave audit tetap ringan.
+      if (!db.objectStoreNames.contains(PHOTO_STORE)) db.createObjectStore(PHOTO_STORE)
     }
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
@@ -24,10 +27,10 @@ function openDb() {
   return dbPromise
 }
 
-function tx(mode, fn) {
+function tx(mode, fn, storeName = STORE) {
   return openDb().then((db) => new Promise((resolve, reject) => {
-    const t = db.transaction(STORE, mode)
-    const store = t.objectStore(STORE)
+    const t = db.transaction(storeName, mode)
+    const store = t.objectStore(storeName)
     const out = fn(store)
     t.oncomplete = () => resolve(out && 'result' in out ? out.result : undefined)
     t.onerror = () => reject(t.error)
@@ -88,4 +91,20 @@ export async function flushAll(audits) {
   for (const id of ids) {
     if (audits[id]) await flushSave(audits[id])
   }
+}
+
+/* ------------------------------ Foto ------------------------------ */
+
+export function putPhoto(id, blob) {
+  return tx('readwrite', (s) => { s.put(blob, id) }, PHOTO_STORE)
+}
+
+export function getPhoto(id) {
+  return tx('readonly', (s) => s.get(id), PHOTO_STORE)
+}
+
+export function deletePhotos(ids) {
+  const list = (ids || []).filter(Boolean)
+  if (!list.length) return Promise.resolve()
+  return tx('readwrite', (s) => { list.forEach((id) => s.delete(id)) }, PHOTO_STORE)
 }

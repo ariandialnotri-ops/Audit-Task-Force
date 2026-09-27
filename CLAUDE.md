@@ -14,7 +14,9 @@ Aplikasi audit SPBU Pertamina Way (standar "Pasti Pas"). Auditor mengisi checkli
 - `src/data/table53.js` — Tabel ASTM-IP 53, disalin dari aplikasi PANTAS (`ariandialnotri-ops/Laporan-Pembongkaran-BBM`, `bongkaran-app/src/data/table53.json`).
 - `src/lib/density.js` — port `density.ts` PANTAS (bilinear tabel 53, cadangan rumus 53B).
 - `src/lib/scoring.js` — skoring murni + aturan otomatis (density, tera, tenant, pencarian). Diuji di `tests/`.
-- `src/lib/storage.js` — IndexedDB (`audit-pertamina-way`/`audits`), autosave debounce + flush saat Submit; migrasi otomatis dari `localStorage` `pw_audits_v1`.
+- `src/lib/storage.js` — IndexedDB `audit-pertamina-way` v2: store `audits` (JSON ringan) + store `photos` (Blob foto penuh, key = id foto). Autosave debounce + flush saat Submit; migrasi otomatis dari `localStorage` `pw_audits_v1`.
+- `src/lib/photos.js` — metadata foto `{id, thumb, ts, lat, lng, acc, path?}`; foto penuh hanya dimuat untuk laporan/PDF/upload. Foto lama (dataURL di audit) dimigrasi otomatis.
+- `src/lib/cloud.js` — Supabase (dimuat dinamis): auth email/password, `audit_claim_first`, push audit + upload foto ke bucket `audit-foto`, rekap & pull. Skema: `supabase/migrations/`.
 - `src/lib/camera.js` — kamera getUserMedia layar penuh + watchPosition GPS + stamp teks di foto. Tidak ada input file/galeri.
 - Deploy: Vercel (`vercel.json`, framework vite, output `dist`).
 
@@ -31,7 +33,7 @@ audit = {
           nozzles: [{ id, nomor, produk }],
           umkTahunIni, umkTahunLalu, upahOperator, hariKerja, bpjs },
   results: {
-    [itemCode]: { grade, note, photos: [{src, ts, lat, lng, acc}], jumlah, submittedAt, changedAfterSubmit,
+    [itemCode]: { grade, note, photos: [{id, thumb, ts, lat, lng, acc, path?}], jumlah, submittedAt, changedAfterSubmit,
                   density?: { refObs, refSuhu, refD15Manual, waktuBongkar, obs, suhu },   // 2.2.f–2.2.l
                   tera?: { [nozzleId]: 'selisih ml' },                                 // 2.2.m
                   tenants?: [{ id, nama, kategori, nomorIzin, berlakuSampai, fotoTenant: [], fotoIzin: [] }] } // 5.2.f
@@ -39,7 +41,7 @@ audit = {
 }
 ```
 
-Foto v1 berupa string dataURL masih didukung (`photoSrc()`).
+Audit juga punya `syncedAt` (versi `updatedAt` terakhir yang sudah terkirim ke cloud). Foto v1 (string dataURL) dimigrasi ke store `photos` saat aplikasi dibuka.
 
 ## Aturan otomatis v2
 
@@ -79,7 +81,7 @@ Kedua file ini **tidak disertakan di repo ini** (dokumen internal Pertamina) —
 
 ## Yang belum dikerjakan / rencana lanjutan
 
-Lihat bagian "Roadmap" di `README.md`. Prioritas yang disebut Rian: sinkronisasi cloud (kemungkinan Supabase, konsisten dengan project `setoran-tepat` miliknya), kalkulator Q&Q per-nozzle, export ke format Excel asli, dan alur approval berlapis (Auditor → Verifikator → Koordinator).
+Lihat bagian "Roadmap" di `README.md`. Sinkronisasi cloud & kalkulator Q&Q sudah selesai (v2). Tersisa: export ke format Excel asli, alur approval berlapis, aturan nilai B/C tera 2.2.m (menunggu ketentuan dari sumber).
 
 ## Gaya UI
 

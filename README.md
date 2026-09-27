@@ -4,7 +4,15 @@ Aplikasi mobile-web untuk audit SPBU Pertamina Way (Pasti Pas Good/Excellent). A
 
 ## Status saat ini (v2)
 
-Web app statis berbasis **Vite + vanilla JS** (tanpa framework), siap deploy di **Vercel**. Data audit (termasuk foto) tersimpan otomatis di **IndexedDB** perangkat auditor; data v1 dari `localStorage` dimigrasikan otomatis.
+Web app statis berbasis **Vite + vanilla JS** (tanpa framework), siap deploy di **Vercel**. Offline-first: data audit tersimpan otomatis di **IndexedDB** perangkat auditor (foto sebagai file terpisah + thumbnail), lalu tersinkron ke **Supabase** saat auditor login dan ada sinyal. Data v1 dari `localStorage` dimigrasikan otomatis.
+
+## Sinkronisasi cloud (Supabase)
+
+- Proyek Supabase yang sama dengan aplikasi PANTAS; semua objek berawalan `audit_` (lihat `supabase/migrations/20260927050000_audit_init.sql`, sudah diterapkan).
+- Tabel `audit_reports` (data audit tanpa foto penuh + ringkasan skor), `audit_members` (admin/auditor), bucket privat `audit-foto`. Semua dijaga RLS: hanya anggota terdaftar.
+- Admin awal = pengawas PANTAS. Admin menambah anggota di tab **Cloud → Anggota** (akun harus sudah dibuat di Supabase → Authentication → Users).
+- Tab **Cloud**: login, status sinkron, **Rekap Audit Semua SPBU** (skor, klasifikasi, auditor) dan unduh audit lengkap ke perangkat.
+- URL & publishable key Supabase ada di `src/lib/cloud.js` (aman di klien; bisa ditimpa env `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY`).
 
 ## Menjalankan
 
@@ -62,8 +70,20 @@ Gaya visual mengikuti design system **AeroShift SPBU** (lihat `DESIGN.md`) — i
 
 ## Roadmap / rekomendasi pengembangan
 
-1. **Sinkronisasi cloud** (belum)  — saat ini data hanya tersimpan lokal per HP. Perlu backend (disarankan Supabase, seperti stack di project `setoran-tepat`) supaya Area Business Head bisa merekap hasil audit dari banyak SPBU/auditor sekaligus.
+1. ~~Sinkronisasi cloud~~ — selesai di v2 (Supabase, offline-first).  — saat ini data hanya tersimpan lokal per HP. Perlu backend (disarankan Supabase, seperti stack di project `setoran-tepat`) supaya Area Business Head bisa merekap hasil audit dari banyak SPBU/auditor sekaligus.
 2. ~~Kalkulator Q&Q detail~~ — selesai di v2 (density @15°C & tera per nozzle).
 3. **Export ke Excel** — menghasilkan file dengan format yang sama persis dengan `SIMULASI_AUDIT_TERBARU_INTERTEK.xlsx` untuk arsip internal.
 4. **Alur approval berlapis** — Auditor → Verifikator → Koordinator dengan status & tanda tangan digital, sesuai kolom di laporan asli (Auditor 1/2, Verifikator, Koordinator, Acknowledge).
 5. Kemungkinan migrasi dari vanilla JS ke React/Vite/Tailwind (pola yang sama dipakai di project Bongkaran BBM) kalau aplikasi ini terus tumbuh dan butuh state management yang lebih rapi.
+
+## Performa (diukur: Chromium, CPU diperlambat 4×, jaringan Slow 4G)
+
+| Pengukuran | Hasil |
+|---|---|
+| Unduhan awal (JS + CSS, gzip) | ±56 KB (+ Supabase 56 KB dimuat belakangan; PDF 177 KB hanya saat unduh PDF) |
+| Aplikasi siap dipakai | ±0,8 detik |
+| Autosave audit berisi 60 foto | 8 ms (sebelumnya 209 ms) |
+| Buka elemen checklist (58 item) | ±110 ms (sebelumnya 670 ms) |
+| Klik nilai / pencarian | 17 ms / 41 ms |
+| Memori JS (audit 60 foto) | 32 MB (sebelumnya 69 MB) |
+| Ukuran foto | ±150 KB per foto (1280 px) + thumbnail ±3–6 KB |

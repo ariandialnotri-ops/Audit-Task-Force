@@ -8,6 +8,7 @@
  * - Setiap foto dicap (stamp) tanggal, jam, koordinat, akurasi, nomor SPBU
  *   dan kode item langsung di gambar.
  */
+import { canvasThumb } from './photos.js'
 
 export class GpsError extends Error {
   constructor(code, message) {
@@ -92,7 +93,7 @@ function drawStamp(ctx, w, h, lines) {
 }
 
 /**
- * Buka kamera layar penuh. Resolve dengan foto `{src, ts, lat, lng, acc}`
+ * Buka kamera layar penuh. Resolve dengan foto `{blob, thumb, ts, lat, lng, acc}`
  * atau null bila dibatalkan. Reject bila kamera/GPS tidak bisa dipakai.
  */
 export function captureStampedPhoto({ label = '', spbu = '' } = {}) {
@@ -202,15 +203,15 @@ export function captureStampedPhoto({ label = '', spbu = '' } = {}) {
           `Lat/Long ${formatCoord(pos)}`,
           [spbu ? `SPBU ${spbu}` : '', label].filter(Boolean).join(' · '),
         ])
-        const src = canvas.toDataURL('image/jpeg', 0.7)
-        const photo = { src, ts, lat: pos.lat, lng: pos.lng, acc: pos.acc }
-        cleanup()
-        resolve(photo)
+        const thumb = canvasThumb(canvas, w, h)
+        const coords = { lat: pos.lat, lng: pos.lng, acc: pos.acc }
+        canvas.toBlob((blob) => {
+          cleanup()
+          if (!blob) { reject(new GpsError('camera', 'Gagal menyimpan foto.')); return }
+          resolve({ blob, thumb, ts, ...coords })
+        }, 'image/jpeg', 0.7)
       }
     })
   })
 }
 
-export function photoSrc(p) {
-  return typeof p === 'string' ? p : p && p.src
-}
