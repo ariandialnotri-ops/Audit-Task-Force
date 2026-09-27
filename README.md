@@ -47,6 +47,12 @@ Gaya visual mengikuti design system **AeroShift SPBU** (lihat `DESIGN.md`) — i
 
 ## Fitur
 
+**Baru di v3.2**
+- Tema terang tetap (sama dengan aplikasi PANTAS/Pembongkaran BBM) walau HP memakai mode gelap.
+- Tata letak dirapikan: input tanggal tidak lagi menimpa Tipe Audit, topbar/pencarian/progress/dock solid, notifikasi muncul di atas.
+- Logo ber-animasi **morphing** saat tombol Masuk ditekan (logo meleleh jadi blob + cincin merah-biru-hijau berputar, bagian logo berdenyut bertahap; sukses → logo mengecil & menghilang ke aplikasi; gagal → logo bergetar).
+- Teks tagline beranda dihapus; footer landing: © Task Force Audit SPBU · Created by Ariandi Alnotri.
+
 **Baru di v3.1**
 - Nama aplikasi **Task Force Audit SPBU** + logo vektor (perisai, kanopi SPBU, dispenser, checklist, swoosh merah-biru-hijau) di landing page, beranda, topbar & favicon.
 - Kategori operator disederhanakan: **Shift 1, Shift 2, Shift 3, OFF** (NS & MD dihapus; data lama dibersihkan otomatis).

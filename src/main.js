@@ -204,6 +204,13 @@ function go(view, params) {
   go._t = setTimeout(() => c.classList.remove('view-enter'), 900)
 }
 
+/** Beri indeks urutan ke tiap bagian logo (untuk animasi morph bertahap). */
+function indexLogoParts() {
+  document.querySelectorAll('.logo-mark').forEach((svg) => {
+    ;[...svg.children].forEach((el, i) => el.style.setProperty('--i', i))
+  })
+}
+
 /** Efek pegas singkat pada elemen (nilai dipilih, chip, dsb). */
 function springPop(el) {
   el.classList.remove('pop')
@@ -233,11 +240,12 @@ function render() {
     document.getElementById('tabbar').innerHTML = ''
     document.getElementById('topbar').innerHTML = ''
     c.innerHTML = cloud.ready ? viewLanding() : `<div class="landing-splash"><div class="brand-logo">${LOGO_MARK}</div><div class="spinner"></div></div>`
+    indexLogoParts()
     return
   }
   renderTabbar()
   renderTopbar()
-  if (currentView === 'home') c.innerHTML = viewHome()
+  if (currentView === 'home') { c.innerHTML = viewHome(); indexLogoParts() }
   else if (currentView === 'history') c.innerHTML = viewHistory()
   else if (currentView === 'form') c.innerHTML = viewForm()
   else if (currentView === 'checklist') c.innerHTML = viewChecklist()
@@ -305,9 +313,7 @@ function viewHome() {
   return `
   <div class="hero hero-brand">
     <div class="hero-logo">${LOGO_MARK}</div>
-    <div><h1>${APP_NAME}</h1>
-    <p>Checklist Pasti Pas &middot; foto ber-timestamp &amp; kode verifikasi &middot; skor real-time</p>
-    </div>
+    <h1>${APP_NAME}</h1>
   </div>
   <div class="cloud-line" data-tab="account">${cloudLineHtml()}</div>
   <button class="btn-primary" data-action="newaudit" style="margin-bottom:18px;">+ Mulai Audit SPBU Baru</button>
@@ -993,11 +999,11 @@ function checkBodyHtml() {
 
 function viewChecklist() {
   return `
-  <div class="search-bar">
+  <div class="search-dock"><div class="search-bar">
     ${iconSearch}
     <input id="searchInput" type="search" autocomplete="off" placeholder="Cari item… cth. APAR, toilet, density" value="${esc(searchQuery)}">
     ${searchQuery ? `<button class="search-clear" data-action="clearsearch" aria-label="Hapus pencarian">&times;</button>` : ''}
-  </div>
+  </div></div>
   <div id="checkBody">${checkBodyHtml()}</div>
   <div class="sticky-progress" id="progressBox">${progressHtml()}</div>
   <div id="reportFab">${reportFabHtml()}</div>`
@@ -1626,18 +1632,33 @@ async function syncNow(manual = false) {
   }
 }
 
+/** Animasi morphing logo di landing page selama proses login. */
+function logoMorph(state) {
+  const land = document.querySelector('.landing')
+  if (!land) return
+  land.classList.remove('morphing', 'morph-out', 'morph-fail')
+  if (state) { void land.offsetWidth; land.classList.add(state) }
+}
+
 async function cloudLogin(form) {
   const email = form.email.value
   const password = form.password.value
-  const btn = form.querySelector('button')
+  const btn = form.querySelector('button[type=submit]')
   btn.disabled = true
-  btn.textContent = 'Masuk…'
+  btn.textContent = 'Memverifikasi…'
+  logoMorph('morphing')
+  const started = Date.now()
   try {
     await cloud.mod.signIn(email, password)
+    // biarkan morph berjalan minimal satu siklus agar terlihat
+    await new Promise((r) => setTimeout(r, Math.max(0, 1300 - (Date.now() - started))))
+    logoMorph('morph-out')
+    await new Promise((r) => setTimeout(r, 700))
     cloud.session = await cloud.mod.getSession()
     await refreshRole()
     showToast(`Masuk sebagai ${cloud.role || 'anggota'}`, 3000)
   } catch (e) {
+    logoMorph('morph-fail')
     showToast(e.message, 4000)
     btn.disabled = false
     btn.textContent = 'Masuk'
@@ -1824,7 +1845,8 @@ function viewLanding() {
       ${msg ? `<p class="landing-warn">${esc(msg)}</p>` : ''}
       ${serverBox}
     </div>
-    <p class="landing-foot">Akses khusus tim audit &middot; data audit tersimpan di perangkat &amp; cloud tim</p>
+    <p class="landing-foot">Akses khusus tim audit &middot; data tersimpan di perangkat &amp; cloud tim</p>
+    <p class="landing-copy">&copy; ${new Date().getFullYear()} ${APP_NAME} &middot; Created by <b>Ariandi Alnotri</b></p>
   </div>`
 }
 

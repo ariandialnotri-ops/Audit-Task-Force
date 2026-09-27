@@ -5,8 +5,10 @@
 export const LOGO_MARK = `<svg class="logo-mark" viewBox="0 0 120 112" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Logo Task Force Audit SPBU">
   <path d="M60 6 104 22v36c0 26-19 42-44 50C35 100 16 84 16 58V22z" fill="#fff" stroke="#1B4DAE" stroke-width="6" stroke-linejoin="round"/>
   <path d="M60 14 96 27v4L60 18 24 31v-4z" fill="#1B4DAE"/>
-  <path d="M27 36 84 26l3 11-57 10z" fill="#E32129"/>
-  <path d="M30 47 87 37v3L30 50z" fill="#1B3F8F"/>
+  <path d="M27 36 82 25l6 6-55 11z" fill="#F0343B"/>
+  <path d="M33 42 88 31v6L33 48z" fill="#C8141D"/>
+  <path d="M33 48 88 37l-4 5-47 9z" fill="#1B3F8F"/>
+  <path d="M44 47l4-1 1 1-4 1zM72 41l4-1 1 1-4 1z" fill="#fff"/>
   <rect x="42" y="47" width="11" height="42" rx="1.5" fill="#EEF3FB" stroke="#1B4DAE" stroke-width="2"/>
   <rect x="45" y="54" width="5" height="3" fill="#E32129"/><rect x="45" y="59" width="5" height="3" fill="#1B6FE0"/><rect x="45" y="64" width="5" height="3" fill="#3FAE3A"/>
   <path d="M42 58h-5a3 3 0 0 0-3 3v17a3 3 0 0 0 6 0v-8" fill="none" stroke="#1B3F8F" stroke-width="2.4" stroke-linecap="round"/>
