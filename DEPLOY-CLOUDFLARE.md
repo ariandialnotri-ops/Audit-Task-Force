@@ -41,7 +41,7 @@ Aplikasi web (Vercel) cukup diberi alamat API Worker. Semua langkah bisa lewat *
    - (Hanya bila memakai R2) *R2 bucket* → Variable name `PHOTOS` → pilih `audit-foto`
 
    Worker → *Settings* → *Variables and Secrets* → **Add**:
-   - Type **Secret**, name `SETUP_TOKEN`, value: kode rahasia buatan Anda (mis. 20 karakter acak). Dipakai sekali untuk membuat admin pertama.
+   - Type **Secret** (centang *Secret*, jangan Text), name `SETUP_TOKEN`, value: kode rahasia buatan Anda. Dipakai sekali untuk membuat admin pertama — setelah admin dibuat, hapus variabel ini (server menolak setup kedua).
    - (Disarankan) Type **Text**, name `ALLOWED_ORIGIN`, value: URL aplikasi, mis. `https://audit-task-force.vercel.app`.
 
 5. **Alamat Worker produksi:** `https://audit-task-force.ariandialnotri.workers.dev` (sudah menjadi default di aplikasi, `src/lib/cloud.js`).

@@ -17,7 +17,7 @@ database_id = "505140b7-6a01-4738-ad1d-9ebd73d35b27"
 # bucket_name = "audit-foto"
 
 [vars]
-# Isi dengan URL aplikasi (mis. https://audit-task-force.vercel.app) agar hanya aplikasi itu yang bisa memanggil API.
-ALLOWED_ORIGIN = "*"
+# Hanya aplikasi web ini yang boleh memanggil API (CORS).
+ALLOWED_ORIGIN = "https://task-force-audit-app.ariandialnotri.workers.dev"
 
 # Secret (jangan ditulis di sini):  npx wrangler secret put SETUP_TOKEN
