@@ -1,70 +1,133 @@
 /**
- * Sinkronisasi cloud (Supabase) — offline-first.
+ * Sinkronisasi cloud (Cloudflare Worker + D1 + R2) — offline-first.
  *
  * Data tetap disimpan dulu di IndexedDB perangkat. Bila auditor login dan ada
- * sinyal, audit yang berubah dikirim ke tabel `audit_reports` dan fotonya ke
- * bucket privat `audit-foto`. Area Business Head / admin dapat melihat rekap
- * semua audit dan mengunduh audit lengkap ke perangkatnya.
+ * sinyal, audit yang berubah dikirim ke API (`worker/`), foto ke R2. Area
+ * Business Head / admin dapat melihat rekap semua audit dan mengunduh audit
+ * lengkap ke perangkatnya.
  *
- * Modul ini di-load secara dinamis setelah tampilan pertama muncul, supaya
- * library Supabase tidak memperlambat pembukaan aplikasi.
+ * Alamat API diambil dari env build `VITE_AUDIT_API_URL`, atau diisi sekali di
+ * tab Cloud (disimpan di perangkat).
  */
-import { createClient } from '@supabase/supabase-js'
 import { photoLists, photoBlob, newPhotoId, thumbFromBlob } from './photos.js'
 import { putPhoto } from './storage.js'
 
-// URL & publishable key memang aman berada di sisi klien (akses dijaga RLS).
-// Bisa ditimpa lewat environment variable Vercel.
-const URL = import.meta.env.VITE_SUPABASE_URL || 'https://tpkxekmcrzavcyazkuzn.supabase.co'
-const KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_Xmz3qWjXVacxU6gXiWc8uw_ZktJ4A2P'
-const BUCKET = 'audit-foto'
+const LS_URL = 'audit_api_url'
+const LS_TOKEN = 'audit_api_token'
+const LS_USER = 'audit_api_user'
 
-export const cloudEnabled = !!(URL && KEY)
-const sb = cloudEnabled ? createClient(URL, KEY, { auth: { persistSession: true, autoRefreshToken: true } }) : null
+function lsGet(k) { try { return localStorage.getItem(k) } catch { return null } }
+function lsSet(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v) } catch { /* ignore */ } }
 
-function friendly(message) {
-  if (/failed to fetch|networkerror|load failed/i.test(message || '')) return 'Tidak dapat terhubung ke server. Periksa koneksi internet.'
-  return message
+export function apiBase() {
+  return (import.meta.env.VITE_AUDIT_API_URL || lsGet(LS_URL) || '').replace(/\/+$/, '')
+}
+export function apiFromEnv() {
+  return !!import.meta.env.VITE_AUDIT_API_URL
+}
+export function setApiBase(url) {
+  const u = String(url || '').trim().replace(/\/+$/, '')
+  if (u && !/^https:\/\/|^http:\/\/localhost|^http:\/\/127\.0\.0\.1/.test(u)) throw new Error('Alamat API harus diawali https://')
+  lsSet(LS_URL, u || null)
+}
+export function isConfigured() {
+  return !!apiBase()
 }
 
-function check({ data, error }) {
-  if (error) throw new Error(friendly(error.message))
-  return data
+/* ------------------------------ HTTP ------------------------------ */
+
+const listeners = new Set()
+function emit() {
+  const s = sessionFromStorage()
+  listeners.forEach((cb) => cb(s))
 }
+
+function sessionFromStorage() {
+  const token = lsGet(LS_TOKEN)
+  if (!token) return null
+  try { return { token, user: JSON.parse(lsGet(LS_USER) || 'null') } } catch { return null }
+}
+
+function saveSession(token, user) {
+  lsSet(LS_TOKEN, token)
+  lsSet(LS_USER, JSON.stringify(user))
+  emit()
+}
+
+function clearSession() {
+  lsSet(LS_TOKEN, null)
+  lsSet(LS_USER, null)
+  emit()
+}
+
+async function api(method, path, { json, raw, auth = true, expect = 'json' } = {}) {
+  const base = apiBase()
+  if (!base) throw new Error('Alamat API cloud belum diisi')
+  const headers = {}
+  const s = sessionFromStorage()
+  if (auth && s) headers.Authorization = 'Bearer ' + s.token
+  let body
+  if (json !== undefined) { headers['Content-Type'] = 'application/json'; body = JSON.stringify(json) }
+  if (raw) { headers['Content-Type'] = 'image/jpeg'; body = raw }
+  let res
+  try {
+    res = await fetch(base + path, { method, headers, body })
+  } catch {
+    throw new Error('Tidak dapat terhubung ke server. Periksa koneksi internet.')
+  }
+  if (res.status === 401 && auth && s) clearSession()
+  if (!res.ok) {
+    let msg = `Server error ${res.status}`
+    try { msg = (await res.json()).error || msg } catch { /* ignore */ }
+    throw new Error(msg)
+  }
+  if (expect === 'blob') return res.blob()
+  return res.json()
+}
+
+/* ------------------------------ Auth ------------------------------ */
 
 export async function getSession() {
-  if (!sb) return null
-  const { data } = await sb.auth.getSession()
-  return data.session
+  return sessionFromStorage()
 }
 
 export function onAuthChange(cb) {
-  if (!sb) return () => {}
-  const { data } = sb.auth.onAuthStateChange((_event, session) => cb(session))
-  return () => data.subscription.unsubscribe()
+  listeners.add(cb)
+  return () => listeners.delete(cb)
+}
+
+export async function health() {
+  return api('GET', '/api/health', { auth: false })
 }
 
 export async function signIn(email, password) {
-  const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password })
-  if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Email atau password salah.' : friendly(error.message))
+  const { token, user } = await api('POST', '/api/login', { json: { email: email.trim(), password }, auth: false })
+  saveSession(token, user)
+}
+
+export async function setupAdmin(setupToken, email, nama, password) {
+  const { token, user } = await api('POST', '/api/setup', { json: { setupToken, email, nama, password }, auth: false })
+  saveSession(token, user)
 }
 
 export async function signOut() {
-  await sb.auth.signOut()
+  try { await api('POST', '/api/logout') } catch { /* tetap keluar di perangkat */ }
+  clearSession()
 }
 
-/** Peran pengguna login ('admin' | 'auditor'), atau null bila belum terdaftar sebagai anggota. */
+/** Peran pengguna login ('admin' | 'auditor'), null bila sesi tidak berlaku. */
 export async function claimRole() {
-  return check(await sb.rpc('audit_claim_first'))
+  const { user } = await api('GET', '/api/me')
+  lsSet(LS_USER, JSON.stringify(user))
+  return user.role
+}
+
+export async function changePassword(oldPassword, newPassword) {
+  await api('PUT', '/api/me/password', { json: { oldPassword, newPassword } })
 }
 
 /* ------------------------------ Foto ------------------------------ */
 
-function rid() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
-}
-
-/** Unggah foto yang belum punya `path` di storage. Mengubah objek foto (menambah `path`). */
 async function uploadPendingPhotos(audit) {
   let uploaded = 0
   for (const list of photoLists(audit)) {
@@ -72,8 +135,8 @@ async function uploadPendingPhotos(audit) {
       if (!p || p.path) continue
       const blob = await photoBlob(p)
       if (!blob) continue
-      const path = `${audit.id}/${p.id || rid()}.jpg`
-      check(await sb.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: true }))
+      if (!p.id) p.id = newPhotoId()
+      const { path } = await api('PUT', `/api/photos/${encodeURIComponent(audit.id)}/${encodeURIComponent(p.id)}`, { raw: blob })
       p.path = path
       uploaded++
     }
@@ -81,7 +144,7 @@ async function uploadPendingPhotos(audit) {
   return uploaded
 }
 
-/** Salinan audit tanpa file gambar penuh (hanya metadata + thumbnail + path storage). */
+/** Salinan audit tanpa file gambar penuh (hanya metadata + thumbnail + path). */
 function stripForCloud(audit) {
   const copy = JSON.parse(JSON.stringify(audit))
   delete copy.syncedAt
@@ -98,30 +161,27 @@ function stripForCloud(audit) {
 
 export async function pushAudit(audit, summary) {
   const photos = await uploadPendingPhotos(audit)
-  const row = {
-    id: audit.id,
-    status: audit.status === 'selesai' ? 'selesai' : 'draft',
-    nomor_spbu: audit.info.nomorSpbu || null,
-    kota: audit.info.kota || null,
-    tanggal_audit: /^\d{4}-\d{2}-\d{2}$/.test(audit.info.tanggalAudit || '') ? audit.info.tanggalAudit : null,
-    data: stripForCloud(audit),
-    summary,
-    client_updated_at: new Date(audit.updatedAt).toISOString(),
-  }
-  check(await sb.from('audit_reports').upsert(row, { onConflict: 'id' }))
+  await api('PUT', `/api/audits/${encodeURIComponent(audit.id)}`, {
+    json: {
+      status: audit.status === 'selesai' ? 'selesai' : 'draft',
+      nomor_spbu: audit.info.nomorSpbu || null,
+      kota: audit.info.kota || null,
+      tanggal_audit: /^\d{4}-\d{2}-\d{2}$/.test(audit.info.tanggalAudit || '') ? audit.info.tanggalAudit : null,
+      data: stripForCloud(audit),
+      summary,
+      client_updated_at: new Date(audit.updatedAt).toISOString(),
+    },
+  })
   return { photos }
 }
 
 export async function listRemote() {
-  return check(await sb.from('audit_reports')
-    .select('id,status,nomor_spbu,kota,tanggal_audit,summary,client_updated_at,updated_at,created_by')
-    .order('updated_at', { ascending: false })
-    .limit(500))
+  return api('GET', '/api/audits')
 }
 
 /** Unduh audit lengkap (termasuk foto) dari cloud menjadi objek audit lokal. */
 export async function pullAudit(id, onProgress) {
-  const row = check(await sb.from('audit_reports').select('data,client_updated_at').eq('id', id).single())
+  const row = await api('GET', `/api/audits/${encodeURIComponent(id)}`)
   const audit = row.data
   const lists = photoLists(audit)
   const total = lists.reduce((n, l) => n + l.length, 0)
@@ -129,7 +189,7 @@ export async function pullAudit(id, onProgress) {
   for (const list of lists) {
     for (const p of list) {
       if (p.path) {
-        const blob = check(await sb.storage.from(BUCKET).download(p.path))
+        const blob = await api('GET', `/api/photos/${p.path.split('/').map(encodeURIComponent).join('/')}`, { expect: 'blob' })
         if (!p.id) p.id = newPhotoId()
         await putPhoto(p.id, blob)
         if (!p.thumb) p.thumb = await thumbFromBlob(blob)
@@ -144,19 +204,19 @@ export async function pullAudit(id, onProgress) {
 }
 
 export async function deleteRemote(id) {
-  check(await sb.from('audit_reports').delete().eq('id', id))
+  await api('DELETE', `/api/audits/${encodeURIComponent(id)}`)
 }
 
 /* ------------------------------ Anggota ------------------------------ */
 
 export async function listMembers() {
-  return check(await sb.from('audit_members').select('user_id,email,nama,role,created_at').order('created_at'))
+  return api('GET', '/api/members')
 }
 
-export async function addMember(email, nama, role) {
-  check(await sb.rpc('audit_add_member', { p_email: email, p_nama: nama, p_role: role }))
+export async function addMember(email, nama, role, password) {
+  await api('POST', '/api/members', { json: { email, nama, role, password } })
 }
 
 export async function removeMember(userId) {
-  check(await sb.from('audit_members').delete().eq('user_id', userId))
+  await api('DELETE', `/api/members/${encodeURIComponent(userId)}`)
 }

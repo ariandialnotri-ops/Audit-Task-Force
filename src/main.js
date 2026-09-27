@@ -25,11 +25,11 @@ const critOpenSet = new Set()
 let searchQuery = ''
 let pinaltiFilter = null // null | 'all' | elCode
 
-/* Cloud (Supabase) — modul dimuat dinamis setelah tampilan pertama. */
+/* Cloud (Cloudflare Worker + D1 + R2) — modul dimuat dinamis setelah tampilan pertama. */
 const cloud = {
   mod: null, enabled: false, session: null, role: null,
   status: 'idle', // idle | syncing | error | offline
-  message: '', lastSync: null,
+  message: '', lastSync: null, needsSetup: false,
   remote: null, remoteLoading: false, remoteError: '',
   members: null, remoteFilter: '',
 }
@@ -1262,9 +1262,10 @@ function summaryFor(a) {
 }
 
 function cloudLineHtml() {
-  if (!cloud.enabled) return ''
+  if (!cloud.mod) return ''
+  if (!cloud.enabled) return `${iconCloud} Data hanya di perangkat ini &middot; <u>hubungkan cloud</u>`
   if (!cloud.session) return `${iconCloud} Data hanya di perangkat ini &middot; <u>login untuk sinkron cloud</u>`
-  if (!cloud.role) return `${iconCloud} Akun belum terdaftar sebagai anggota audit`
+  if (!cloud.role) return `${iconCloud} Tidak dapat memeriksa akun cloud`
   const pend = pendingCount()
   if (cloud.status === 'syncing') return `${iconCloud} Menyinkronkan…`
   if (cloud.status === 'offline') return `${iconCloud} Offline &middot; ${pend} audit menunggu sinkron`
@@ -1275,8 +1276,18 @@ function cloudLineHtml() {
 function refreshCloudUi() {
   document.querySelectorAll('.cloud-line').forEach((el) => { el.innerHTML = cloudLineHtml() })
   if (currentView === 'cloud') {
+    // Pertahankan isian form & fokus saat tab Cloud diperbarui (mis. setelah rekap selesai dimuat)
+    const keyOf = (el) => el.id || (el.form && el.form.id && el.name ? `${el.form.id}:${el.name}` : '')
+    const saved = new Map()
+    document.querySelectorAll('#content input, #content select').forEach((el) => { const k = keyOf(el); if (k && el.type !== 'password') saved.set(k, el.value) })
+    const active = document.activeElement && keyOf(document.activeElement)
     const y = window.scrollY
     render()
+    document.querySelectorAll('#content input, #content select').forEach((el) => {
+      const k = keyOf(el)
+      if (k && saved.has(k) && !el.value) el.value = saved.get(k)
+      if (k && k === active) el.focus()
+    })
     window.scrollTo(0, y)
   }
 }
@@ -1288,14 +1299,22 @@ async function initCloud() {
     console.warn('Modul cloud gagal dimuat', e)
     return
   }
-  cloud.enabled = cloud.mod.cloudEnabled
-  if (!cloud.enabled) return
-  cloud.session = await cloud.mod.getSession().catch(() => null)
   cloud.mod.onAuthChange((session) => {
-    const changed = (session && session.user.id) !== (cloud.session && cloud.session.user.id)
+    const changed = (session && session.user && session.user.id) !== (cloud.session && cloud.session.user && cloud.session.user.id)
     cloud.session = session
     if (changed) refreshRole()
   })
+  await connectCloud()
+}
+
+/** (Ulang) sambungkan ke API cloud sesuai konfigurasi saat ini. */
+async function connectCloud() {
+  cloud.enabled = cloud.mod.isConfigured()
+  cloud.session = cloud.enabled ? await cloud.mod.getSession() : null
+  cloud.needsSetup = false
+  if (cloud.enabled && !cloud.session && navigator.onLine) {
+    try { cloud.needsSetup = (await cloud.mod.health()).needsSetup } catch (e) { cloud.message = e.message }
+  }
   await refreshRole()
 }
 
@@ -1304,7 +1323,14 @@ async function refreshRole() {
   cloud.remote = null
   cloud.members = null
   if (cloud.session && navigator.onLine) {
-    try { cloud.role = await cloud.mod.claimRole() } catch (e) { cloud.message = e.message }
+    try {
+      cloud.role = await cloud.mod.claimRole()
+    } catch (e) {
+      cloud.message = e.message
+      cloud.session = await cloud.mod.getSession()
+    }
+  } else if (cloud.session) {
+    cloud.role = cloud.session.user && cloud.session.user.role // offline: pakai peran tersimpan
   }
   refreshCloudUi()
   if (cloud.role) syncNow()
@@ -1364,11 +1390,48 @@ async function cloudLogin(form) {
     await cloud.mod.signIn(email, password)
     cloud.session = await cloud.mod.getSession()
     await refreshRole()
-    showToast(cloud.role ? `Masuk sebagai ${cloud.role}` : 'Login berhasil, tetapi akun belum terdaftar sebagai anggota audit', 3500)
+    showToast(`Masuk sebagai ${cloud.role || 'anggota'}`, 3000)
   } catch (e) {
     showToast(e.message, 4000)
     btn.disabled = false
     btn.textContent = 'Masuk'
+  }
+}
+
+async function cloudSetup(form) {
+  const btn = form.querySelector('button')
+  btn.disabled = true
+  try {
+    await cloud.mod.setupAdmin(form.setupToken.value.trim(), form.email.value, form.nama.value, form.password.value)
+    cloud.session = await cloud.mod.getSession()
+    cloud.needsSetup = false
+    await refreshRole()
+    showToast('✓ Admin pertama dibuat', 3000)
+  } catch (e) {
+    showToast(e.message, 4500)
+    btn.disabled = false
+  }
+}
+
+async function saveApiUrl(form) {
+  try {
+    cloud.mod.setApiBase(form.apiUrl.value)
+    await connectCloud()
+    if (cloud.enabled && !cloud.message) showToast('✓ Terhubung ke API cloud')
+    else if (cloud.message) showToast(cloud.message, 4500)
+  } catch (e) {
+    showToast(e.message, 4000)
+  }
+}
+
+async function changePwFromForm(form) {
+  if (form.newPw.value !== form.newPw2.value) { showToast('Konfirmasi password baru tidak sama'); return }
+  try {
+    await cloud.mod.changePassword(form.oldPw.value, form.newPw.value)
+    form.reset()
+    showToast('✓ Password diganti')
+  } catch (e) {
+    showToast(e.message, 4000)
   }
 }
 
@@ -1413,10 +1476,12 @@ async function addMemberFromForm() {
   const email = document.getElementById('mEmail').value
   const nama = document.getElementById('mNama').value
   const role = document.getElementById('mRole').value
+  const password = document.getElementById('mPass').value
   if (!email.trim()) { showToast('Isi email anggota'); return }
   try {
-    await cloud.mod.addMember(email, nama, role)
-    showToast('✓ Anggota ditambahkan')
+    await cloud.mod.addMember(email, nama, role, password)
+    ;['mPass', 'mEmail', 'mNama'].forEach((k) => { document.getElementById(k).value = '' })
+    showToast(password ? '✓ Anggota disimpan. Berikan password awal ke anggota tersebut.' : '✓ Anggota diperbarui', 4000)
     cloud.members = await cloud.mod.listMembers()
     refreshCloudUi()
   } catch (e) {
@@ -1437,7 +1502,7 @@ async function removeMemberClick(userId) {
 
 function remoteListHtml() {
   const q = cloud.remoteFilter.trim().toLowerCase()
-  const rows = (cloud.remote || []).filter((r) => !q || [r.nomor_spbu, r.kota, r.summary && r.summary.areaBusinessHead, r.summary && r.summary.auditorEmail].join(' ').toLowerCase().includes(q))
+  const rows = (cloud.remote || []).filter((r) => !q || [r.nomor_spbu, r.kota, r.summary && r.summary.areaBusinessHead, r.summary && r.summary.auditorEmail, r.created_by_email].join(' ').toLowerCase().includes(q))
   if (!rows.length) return `<div class="hint" style="padding:10px 4px;">${cloud.remote && cloud.remote.length ? 'Tidak ada yang cocok.' : 'Belum ada audit di cloud.'}</div>`
   return rows.map((r) => {
     const sm = r.summary || {}
@@ -1455,7 +1520,7 @@ function remoteListHtml() {
       <div class="meta">
         <div class="title">${esc(r.nomor_spbu || 'SPBU')} &middot; ${esc(r.kota || '-')}</div>
         <div class="sub">${esc(r.tanggal_audit || '-')} &middot; ${clsLabel(sm.classification)} &middot; ${sm.totalSubmitted || 0}/${sm.totalItems || 125} submit</div>
-        <div class="sub">${esc(sm.auditorEmail || '')} <span class="pill ${r.status}">${r.status === 'selesai' ? 'Selesai' : 'Draft'}</span></div>
+        <div class="sub">${esc(sm.auditorEmail || r.created_by_email || '')} <span class="pill ${r.status}">${r.status === 'selesai' ? 'Selesai' : 'Draft'}</span></div>
       </div>
       ${badge}
     </div>`
@@ -1464,7 +1529,33 @@ function remoteListHtml() {
 
 function viewCloud() {
   if (!cloud.mod) return `<div class="empty-state">Memuat modul cloud…</div>`
-  if (!cloud.enabled) return `<div class="card">Sinkronisasi cloud belum dikonfigurasi.</div>`
+  if (!cloud.enabled) {
+    return `
+    <div class="card">
+      <b>Hubungkan ke Cloud</b>
+      <p class="hint">Isi alamat API Cloudflare Worker milik tim audit (didapat saat deploy, mis. <code>https://audit-pertamina-way-api.nama-anda.workers.dev</code>). Cukup sekali per perangkat. Tanpa ini aplikasi tetap bisa dipakai penuh, data tersimpan di HP.</p>
+      <form id="apiForm">
+        <div class="field"><label>Alamat API</label><input name="apiUrl" type="url" inputmode="url" placeholder="https://…workers.dev" required></div>
+        <button class="btn-primary" type="submit">Simpan &amp; Hubungkan</button>
+      </form>
+    </div>`
+  }
+  const apiInfo = `<p class="hint" style="margin-top:10px;word-break:break-all;">API: ${esc(cloud.mod.apiBase())}${cloud.mod.apiFromEnv() ? '' : ' · <button class="link-danger" data-action="resetapi">ubah</button>'}</p>`
+  if (!cloud.session && cloud.needsSetup) {
+    return `
+    <div class="card">
+      <b>Buat Admin Pertama</b>
+      <p class="hint">Database cloud masih kosong. Isi kode setup (SETUP_TOKEN yang dibuat saat deploy Worker) untuk membuat akun admin. Setelah itu admin menambahkan auditor dari tab ini.</p>
+      <form id="setupForm" autocomplete="on">
+        <div class="field"><label>Kode setup</label><input name="setupToken" required autocomplete="off"></div>
+        <div class="field"><label>Nama</label><input name="nama"></div>
+        <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
+        <div class="field"><label>Password (min. 8 karakter)</label><input name="password" type="password" autocomplete="new-password" minlength="8" required></div>
+        <button class="btn-primary" type="submit">Buat Admin</button>
+      </form>
+      ${apiInfo}
+    </div>`
+  }
   if (!cloud.session) {
     return `
     <div class="card">
@@ -1475,15 +1566,17 @@ function viewCloud() {
         <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
         <button class="btn-primary" type="submit">Masuk</button>
       </form>
-      <p class="hint" style="margin-top:10px;">Akun dibuat oleh admin di Supabase Auth (akun yang sama dengan aplikasi PANTAS bisa dipakai), lalu didaftarkan sebagai anggota audit oleh admin.</p>
+      <p class="hint" style="margin-top:10px;">Akun dibuat oleh admin audit di tab Cloud → Anggota.</p>
+      ${cloud.message ? `<p class="hint" style="color:var(--status-warning)">${esc(cloud.message)}</p>` : ''}
+      ${apiInfo}
     </div>`
   }
-  const email = esc(cloud.session.user.email)
+  const email = esc(cloud.session.user && cloud.session.user.email)
   if (!cloud.role) {
     return `
     <div class="card">
       <b>${email}</b>
-      <p class="hint">Akun ini belum terdaftar sebagai anggota aplikasi audit. Minta admin menambahkan email Anda di menu Cloud &rarr; Anggota.${cloud.message ? `<br><span style="color:var(--status-warning)">${esc(cloud.message)}</span>` : ''}</p>
+      <p class="hint">Tidak dapat memeriksa akun.${cloud.message ? `<br><span style="color:var(--status-warning)">${esc(cloud.message)}</span>` : ''}</p>
       <button class="btn-secondary" data-action="logout">Keluar</button>
     </div>`
   }
@@ -1494,12 +1587,14 @@ function viewCloud() {
     <div class="card">
       ${(cloud.members || []).map((m) => `<div class="link-row"><span class="l">${esc(m.nama || m.email)}<br><small class="hint">${esc(m.email)}</small></span><span class="v">${m.role}${m.user_id !== cloud.session.user.id ? ` <button class="link-danger" data-rmmember="${m.user_id}">hapus</button>` : ''}</span></div>`).join('') || '<p class="hint">Memuat…</p>'}
       <div class="calc-sec" style="margin-top:12px;">Tambah anggota</div>
-      <div class="field"><label>Email akun (sudah dibuat di Supabase Auth)</label><input id="mEmail" type="email"></div>
+      <div class="field"><label>Email</label><input id="mEmail" type="email"></div>
       <div class="field-row">
         <div class="field"><label>Nama</label><input id="mNama"></div>
         <div class="field"><label>Peran</label><select id="mRole"><option value="auditor">Auditor</option><option value="admin">Admin</option></select></div>
       </div>
-      <button class="btn-secondary" data-action="addmember">+ Tambah Anggota</button>
+      <div class="field"><label>Password awal (min. 8) — isi juga untuk reset password</label><input id="mPass" type="text" autocomplete="off"></div>
+      <button class="btn-secondary" data-action="addmember">Simpan Anggota</button>
+      <p class="hint" style="margin-top:8px;">Email yang sudah terdaftar akan diperbarui (nama/peran); bila password diisi, password direset dan akun dibuka dari kunci.</p>
     </div>` : ''
   return `
   <div class="card">
@@ -1512,6 +1607,15 @@ function viewCloud() {
     <button class="btn-primary" data-action="syncnow" style="margin-top:10px;">Sinkronkan Sekarang</button>
     <div style="height:8px"></div>
     <button class="btn-secondary" data-action="logout">Keluar</button>
+    <details class="crit" style="margin-top:12px;"><summary>Ganti password</summary>
+      <form id="pwForm" style="margin-top:8px;">
+        <div class="field"><label>Password lama</label><input name="oldPw" type="password" autocomplete="current-password" required></div>
+        <div class="field"><label>Password baru (min. 8)</label><input name="newPw" type="password" autocomplete="new-password" minlength="8" required></div>
+        <div class="field"><label>Ulangi password baru</label><input name="newPw2" type="password" autocomplete="new-password" required></div>
+        <button class="btn-secondary" type="submit">Simpan Password</button>
+      </form>
+    </details>
+    ${`<p class="hint" style="margin-top:10px;word-break:break-all;">API: ${esc(cloud.mod.apiBase())}</p>`}
   </div>
 
   <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;">Rekap Audit Semua SPBU <button class="btn-mini ghost" data-action="loadremote">Muat ulang</button></div>
@@ -1586,6 +1690,11 @@ function onClick(ev) {
     else if (action === 'finish') { curAudit().status = 'selesai'; persist(currentAuditId); showToast('Audit ditandai selesai'); render() }
     else if (action === 'sharetext') shareTextSummary()
     else if (action === 'syncnow') syncNow(true)
+    else if (action === 'resetapi') {
+      if (confirm('Ubah alamat API cloud? Anda akan keluar dari akun cloud di perangkat ini.')) {
+        cloud.mod.signOut().finally(() => { cloud.mod.setApiBase(''); connectCloud() })
+      }
+    }
     else if (action === 'logout') cloudLogout()
     else if (action === 'loadremote') loadRemote()
     else if (action === 'addmember') addMemberFromForm()
@@ -1836,7 +1945,12 @@ async function init() {
   }, true)
   document.getElementById('modalRoot').addEventListener('click', onClick)
   app.addEventListener('submit', (ev) => {
-    if (ev.target.id === 'loginForm') { ev.preventDefault(); cloudLogin(ev.target) }
+    const id = ev.target.id
+    if (['loginForm', 'setupForm', 'apiForm', 'pwForm'].includes(id)) ev.preventDefault()
+    if (id === 'loginForm') cloudLogin(ev.target)
+    if (id === 'setupForm') cloudSetup(ev.target)
+    if (id === 'apiForm') saveApiUrl(ev.target)
+    if (id === 'pwForm') changePwFromForm(ev.target)
   })
   window.addEventListener('online', () => { if (cloud.status === 'offline') cloud.status = 'idle'; syncNow() })
 

@@ -1,0 +1,21 @@
+name = "audit-pertamina-way-api"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# Buat dulu:  npx wrangler d1 create audit-pertamina-way
+# lalu ganti database_id di bawah dengan ID yang ditampilkan.
+[[d1_databases]]
+binding = "DB"
+database_name = "audit-pertamina-way"
+database_id = "GANTI-DENGAN-ID-D1"
+
+# Buat dulu:  npx wrangler r2 bucket create audit-foto
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "audit-foto"
+
+[vars]
+# Isi dengan URL aplikasi (mis. https://audit-task-force.vercel.app) agar hanya aplikasi itu yang bisa memanggil API.
+ALLOWED_ORIGIN = "*"
+
+# Secret (jangan ditulis di sini):  npx wrangler secret put SETUP_TOKEN
