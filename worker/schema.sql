@@ -1,5 +1,5 @@
 -- Skema D1 (SQLite) untuk API Audit Pertamina Way.
--- Jalankan sekali: wrangler d1 execute audit-pertamina-way --remote --file=schema.sql
+-- Jalankan sekali: wrangler d1 execute audit-task-force --remote --file=schema.sql
 -- (atau tempel di Cloudflare Dashboard → D1 → database → Console).
 
 CREATE TABLE IF NOT EXISTS users (

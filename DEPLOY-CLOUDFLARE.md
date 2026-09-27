@@ -5,7 +5,7 @@ Cloud aplikasi Audit Pertamina Way berjalan di akun Cloudflare Anda sendiri, ter
 | Komponen | Layanan Cloudflare | Nama |
 |---|---|---|
 | API (login, data audit, anggota) | Worker | `audit-task-force` |
-| Database audit & akun | D1 | `audit-pertamina-way` |
+| Database audit & akun | D1 | `audit-task-force` |
 | Foto bukti | R2 | `audit-foto` |
 
 Nama Worker, database, dan bucket boleh diganti (mis. Worker bernama `audit-task-force`); yang **wajib persis** hanya nama variabel binding: `DB`, `PHOTOS`, dan secret `SETUP_TOKEN`.
@@ -17,8 +17,8 @@ Aplikasi web (Vercel) cukup diberi alamat API Worker. Semua langkah bisa lewat *
 ## Cara A — lewat Cloudflare Dashboard
 
 1. **Buat database D1**
-   Dashboard → *Storage & Databases* → *D1 SQL Database* → **Create** → nama `audit-pertamina-way`.
-   Buka database → tab **Console** → tempel seluruh isi [`worker/schema.sql`](worker/schema.sql) → **Execute**.
+   Dashboard → *Storage & Databases* → *D1 SQL Database* → **Create** → nama `audit-task-force`.
+   Buka database → tab **Console/Studio** → tempel seluruh isi [`worker/schema.sql`](worker/schema.sql) → **Ctrl+A** → panah ▾ di tombol Run → **Run all** (tombol Run biasa hanya menjalankan satu perintah di posisi kursor). Hasil: *Executed 7/7* dan tabel `users`, `sessions`, `audits` muncul.
 
 2. **Buat bucket R2**
    Dashboard → *R2 Object Storage* → **Create bucket** → nama `audit-foto`.
@@ -30,7 +30,7 @@ Aplikasi web (Vercel) cukup diberi alamat API Worker. Semua langkah bisa lewat *
 
 4. **Hubungkan database, bucket & secret**
    Worker → *Settings* → *Bindings* → **Add**:
-   - *D1 database* → Variable name `DB` → pilih `audit-pertamina-way`
+   - *D1 database* → Variable name `DB` → pilih `audit-task-force`
    - *R2 bucket* → Variable name `PHOTOS` → pilih `audit-foto`
 
    Worker → *Settings* → *Variables and Secrets* → **Add**:
@@ -46,7 +46,7 @@ Aplikasi web (Vercel) cukup diberi alamat API Worker. Semua langkah bisa lewat *
 cd worker
 npm install
 npx wrangler login
-npx wrangler d1 create audit-pertamina-way        # salin database_id ke wrangler.toml
+npx wrangler d1 create audit-task-force        # salin database_id ke wrangler.toml
 npx wrangler r2 bucket create audit-foto
 npm run db:init                                   # jalankan schema.sql ke D1 (remote)
 npx wrangler secret put SETUP_TOKEN               # ketik kode rahasia

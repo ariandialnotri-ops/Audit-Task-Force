@@ -2,11 +2,11 @@ name = "audit-task-force"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
 
-# Buat dulu:  npx wrangler d1 create audit-pertamina-way
+# Buat dulu:  npx wrangler d1 create audit-task-force
 # lalu ganti database_id di bawah dengan ID yang ditampilkan.
 [[d1_databases]]
 binding = "DB"
-database_name = "audit-pertamina-way"
+database_name = "audit-task-force"
 database_id = "GANTI-DENGAN-ID-D1"
 
 # Buat dulu:  npx wrangler r2 bucket create audit-foto
