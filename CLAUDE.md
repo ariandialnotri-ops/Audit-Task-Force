@@ -6,7 +6,7 @@ Konteks proyek ini untuk Claude Code. Baca file ini sebelum mengerjakan perubaha
 
 Aplikasi audit SPBU Pertamina Way (standar "Pasti Pas"). Auditor mengisi checklist 125 item, memberi nilai, memotret bukti, dan sistem menghitung skor + klasifikasi Good/Excellent/Gagal secara otomatis. Dipakai oleh Area Business Head Pertamina Retail dan tim auditnya untuk audit rutin SPBU di wilayah Jawa Timur (Kediri, Nganjuk, dll).
 
-## Arsitektur saat ini (v2)
+## Arsitektur saat ini (v3)
 
 - Vite + vanilla JS (ES modules), tanpa framework. `npm run dev` / `npm run build` / `npm test` (node:test).
 - `index.html` — shell. `src/main.js` — view, router & event delegation (satu listener click/input/change di `#app`).
@@ -18,7 +18,10 @@ Aplikasi audit SPBU Pertamina Way (standar "Pasti Pas"). Auditor mengisi checkli
 - `src/lib/photos.js` — metadata foto `{id, thumb, ts, lat, lng, acc, path?}`; foto penuh hanya dimuat untuk laporan/PDF/upload. Foto lama (dataURL di audit) dimigrasi otomatis.
 - `src/lib/cloud.js` — klien API cloud (dimuat dinamis): token Bearer di localStorage, push audit + upload foto, rekap, pull, anggota. Alamat API: `VITE_AUDIT_API_URL` → isian tab Cloud → default `https://audit-task-force.ariandialnotri.workers.dev`.
 - `worker/` — backend Cloudflare Worker (`src/index.js`), skema D1 (`schema.sql`), `wrangler.toml`, uji API (`npm test` terhadap `wrangler dev` lokal). Binding: `DB` (D1), `PHOTOS` (R2 **opsional**, key `<auditId>/<photoId>.jpg`; tanpa binding ini foto disimpan di tabel D1 `photos` — Rian tidak punya kartu untuk aktivasi R2), secret `SETUP_TOKEN`, var `ALLOWED_ORIGIN`. Klien mengecilkan foto ke 1024 px/q0.62 sebelum upload; admin melihat pemakaian via `GET /api/usage`. Deploy: `DEPLOY-CLOUDFLARE.md`. Sengaja terpisah dari Supabase PANTAS (permintaan Rian).
-- `src/lib/camera.js` — kamera getUserMedia layar penuh + watchPosition GPS + stamp teks di foto. Tidak ada input file/galeri.
+- `src/lib/camera.js` — kamera getUserMedia layar penuh, **tanpa GPS**. Setelah jepret ada pratinjau (Ulangi / Gunakan Foto). Stamp: tanggal-jam, SPBU · item, auditor · kode verifikasi (8 hex dari SHA-256). Metadata foto menyimpan `code`, `sha256` (sidik file) dan `auditor`; `verifyPhoto()` → valid/changed/unknown (`cloudSha256` = salinan terkompres di cloud). Tidak ada input file/galeri.
+- `src/lib/report.js` — `buildReport(audit)`: isi laporan persis struktur Excel referensi `Audit_Pertamina_Way_SPBU_*.xlsx` (Ringkasan, Detail Checklist per kelompok, Komentar Auditor, Pengecekan Q&Q, lampiran foto). Dipakai tampilan Laporan dan PDF.
+- `src/lib/pdf.js` — PDF **A4 vektor** (jsPDF + jspdf-autotable, dimuat dinamis). Aturan: margin 12 mm, setiap blok/kelompok diukur di dokumen sementara lalu dipindah utuh ke halaman baru bila tidak muat (`doc.reportMeta.splitGroups` harus kosong), `rowPageBreak: 'avoid'`, header kolom diulang, footer No. Report + kode verifikasi laporan + halaman. Teks dilewatkan `pdfText()` (font standar WinAnsi).
+- Login wajib: tanpa sesi, `render()` menampilkan landing page (`viewLanding`: login / Buat Admin Pertama / pengaturan server). Tab dock: Beranda, Riwayat, **Akun** (`viewAccount`: sinkron, rekap, anggota, kapasitas, password, keluar), Panduan.
 - Deploy aplikasi web: Cloudflare Workers static assets (`wrangler.jsonc` di root, nama `task-force-audit-app`, header di `public/_headers`) atau Vercel (`vercel.json`). Jangan beri nama `audit-task-force` — itu Worker API.
 
 ## Model data
@@ -29,22 +32,25 @@ audit = {
   lokasiAudit, lokasiTerakhir,          // {lat,lng,acc,ts} dari GPS
   pinaltiPromptShown: bool,
   info: { nomorSpbu, region, kota, alamat, namaPemilik, areaBusinessHead, tipeKepemilikan, tahun, telepon,
-          tanggalAudit, tipeAudit /* kosong default */, koordinator, kelasTarget: 'good'|'excellent',
-          operatorTotal, operatorShift1, operatorShift2, operatorShift3,
-          nozzles: [{ id, nomor, produk }],
-          umkTahunIni, umkTahunLalu, upahOperator, hariKerja, bpjs },
+          tanggalAudit, tipeAudit /* kosong default */, auditors: ['nama', ...], kelasTarget: 'good'|'excellent',
+          operators: { S1, S2, S3, NS, MD, OFF },   // jumlah operator per kategori shift
+          shiftAudit: ['S1', 'NS', ...],            // shift yang bertugas saat audit (OFF tidak dihitung)
+          nozzles: [{ id, nomor, produk }],         // nomor dipilih dari dropdown setelah Submit jumlah
+          umkTahunIni, upahOperator, hariKerja, bpjs, komentarManajer },
+  reportNo?, reportSubmittedAt?,            // diisi saat "Submit Laporan" (status → 'selesai')
   results: {
-    [itemCode]: { grade, note, photos: [{id, thumb, ts, lat, lng, acc, path?}], jumlah, submittedAt, changedAfterSubmit,
-                  density?: { refObs, refSuhu, refD15Manual, waktuBongkar, obs, suhu },   // 2.2.f–2.2.l
-                  tera?: { [nozzleId]: 'selisih ml' },                                 // 2.2.m
+    [itemCode]: { grade, note, photos: [{id, thumb, ts, code, sha256, auditor, path?}], jumlah, submittedAt,
+                  pct?: { ok, n, names },                                             // kalkulator % (n otomatis utk item operator)
+                  density?: { refObs, refSuhu, refD15Manual, obs, suhu },              // 2.2.f–2.2.l
+                  tera?: { [nozzleId]: 'selisih ml' }, teraMode?: { [nozzleId]: 'P'|'M' }, // 2.2.m
                   tenants?: [{ id, nama, kategori, nomorIzin, berlakuSampai, fotoTenant: [], fotoIzin: [] }] } // 5.2.f
   }
 }
 ```
 
-Audit juga punya `syncedAt` (versi `updatedAt` terakhir yang sudah terkirim ke cloud). Foto v1 (string dataURL) dimigrasi ke store `photos` saat aplikasi dibuka.
+Audit juga punya `syncedAt` (versi `updatedAt` terakhir yang sudah terkirim ke cloud). Foto v1 (string dataURL) dimigrasi ke store `photos` saat aplikasi dibuka. `normalizeAudit()` memigrasi data v2: `koordinator` → `auditors[0]`, `operatorShift1-3` → `operators.S1-S3`, hapus `umkTahunLalu`/`changedAfterSubmit`. Foto lama bisa masih punya `lat/lng` (diabaikan).
 
-## Aturan otomatis v2
+## Aturan otomatis
 
 - Density: D15 = tabel ASTM 53 (obs, suhu). |D15 audit − D15 pengiriman terakhir| ≤ 0,003 → saran A, selain itu F.
 - Tera 2.2.m: batas **−60 ml/20 L** (ketentuan Pasti Pas, dikonfirmasi Rian; teks judul guideline yang menyebut −100 ml diabaikan). Nilai A/B/C/F dari tabel "Ketentuan nilai" guideline (`teraGradeByTable`: jumlah nozzle dicek vs jumlah di bawah toleransi). Diterapkan bila cakupan per produk terpenuhi (Good ≥ 50%, Excellent 100%), atau langsung F bila sudah pasti F walau semua nozzle dicek.
@@ -52,6 +58,8 @@ Audit juga punya `syncedAt` (versi `updatedAt` terakhir yang sudah terkirim ke c
 - Tenant 5.2.f: izin berlaku = `berlakuSampai ≥ tanggalAudit` dan ada foto izin. Semua tenant berlaku → A, ada yang tidak → F.
 - Excellent tambahan wajib ≥1 tenant `internasional` + ≥1 tenant `nasional` berizin berlaku (di `computeAudit`).
 - Nilai otomatis diterapkan saat angka berubah; auditor tetap bisa mengganti nilai (muncul peringatan bila berbeda).
+- Item operator (`OPERATOR_ITEMS` di scoring.js): total sampel = operator bertugas (`operatorsOnDuty`, jumlah shift di `shiftAudit` tanpa OFF), 3.1.4.t = total semua operator. Bila sesuai < total, nama operator yang tidak sesuai wajib diisi sebelum Submit.
+- Item yang sudah Submit terkunci (`inert`); tombol **Edit** membukanya kembali (laporan yang sudah terkirim kembali ke draft setelah konfirmasi). Tombol **Submit Laporan** muncul setelah 125 item tersubmit.
 
 ## Rumus skoring (jangan diubah tanpa verifikasi ulang ke sumber Excel)
 
@@ -88,7 +96,7 @@ Kedua file ini **tidak disertakan di repo ini** (dokumen internal Pertamina) —
 
 ## Yang belum dikerjakan / rencana lanjutan
 
-Lihat bagian "Roadmap" di `README.md`. Sinkronisasi cloud & kalkulator Q&Q sudah selesai (v2). Tersisa: export ke format Excel asli, alur approval berlapis, aturan nilai B/C tera 2.2.m (menunggu ketentuan dari sumber).
+Lihat bagian "Roadmap" di `README.md`. Sinkronisasi cloud & kalkulator Q&Q sudah selesai (v2). Tersisa: export ke format Excel asli, alur approval berlapis (Verifikator/Koordinator/Acknowledge di laporan referensi belum dipakai).
 
 ## Gaya UI
 

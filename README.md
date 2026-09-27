@@ -6,12 +6,12 @@ Aplikasi mobile-web untuk audit SPBU Pertamina Way (Pasti Pas Good/Excellent). A
 
 Web app statis berbasis **Vite + vanilla JS** (tanpa framework), siap deploy di **Vercel**. Offline-first: data audit tersimpan otomatis di **IndexedDB** perangkat auditor (foto sebagai file terpisah + thumbnail), lalu tersinkron ke **Cloudflare** (Worker + D1 + R2, terpisah dari PANTAS) saat auditor login dan ada sinyal. Data v1 dari `localStorage` dimigrasikan otomatis.
 
-## Sinkronisasi cloud (Cloudflare)
+## Login & sinkronisasi cloud (Cloudflare)
 
 - Backend sendiri di akun Cloudflare: **Worker** `worker/` (API + login), **D1** (data audit, akun, dan foto — tanpa kartu), **R2** opsional untuk foto bila ada metode pembayaran. Foto dikecilkan ke ±1024 px sebelum upload. Terpisah total dari Supabase PANTAS.
-- Login email + password (hash PBKDF2, token sesi 30 hari, kunci 15 menit setelah 5× salah). Peran: admin / auditor. Admin pertama dibuat dengan kode `SETUP_TOKEN`, anggota lain ditambah admin di tab **Cloud → Anggota**.
-- Tab **Cloud**: hubungkan API, login, status sinkron, **Rekap Audit Semua SPBU**, unduh audit lengkap ke perangkat, ganti password.
-- Alamat API: env build `VITE_AUDIT_API_URL` (Vercel) atau diisi sekali di tab Cloud.
+- **Landing page login**: aplikasi hanya bisa dipakai setelah login (email + password, hash PBKDF2, token sesi 30 hari, kunci 15 menit setelah 5× salah). Setelah login pertama, aplikasi tetap bisa dipakai offline. Saat server masih kosong, landing page menampilkan form **Buat Admin Pertama** (kode `SETUP_TOKEN`).
+- Tab **Akun** (menggantikan tab Cloud): profil, status sinkron, **Rekap Audit Semua SPBU**, unduh audit lengkap ke perangkat, ganti password, keluar; admin juga mengelola **Anggota** & melihat kapasitas.
+- Alamat API: env build `VITE_AUDIT_API_URL` → isian "Pengaturan server" di landing page → default Worker `audit-task-force`.
 - Langkah deploy lengkap: **[DEPLOY-CLOUDFLARE.md](DEPLOY-CLOUDFLARE.md)**.
 
 ## Menjalankan
@@ -23,7 +23,7 @@ npm test          # unit test density ASTM 53, skoring, tera, tenant, pencarian
 npm run build     # hasil build di dist/
 ```
 
-> Kamera & GPS hanya jalan di HTTPS atau `localhost`. Untuk dicoba di HP, pakai URL Vercel.
+> Kamera hanya jalan di HTTPS atau `localhost`. Untuk dicoba di HP, pakai URL Cloudflare/Vercel.
 
 ## Deploy ke Vercel
 
@@ -31,7 +31,7 @@ npm run build     # hasil build di dist/
 2. Framework otomatis terdeteksi **Vite** (`vercel.json` sudah mengatur build `npm run build`, output `dist`). Tidak perlu environment variable.
 3. **Deploy.** Setiap push ke branch akan membuat preview deployment; push ke branch produksi memperbarui URL utama.
 
-`vercel.json` juga mengirim header `Permissions-Policy: camera=(self), geolocation=(self)` supaya kamera & GPS diizinkan.
+`vercel.json` / `public/_headers` mengirim header `Permissions-Policy: camera=(self), geolocation=()` — kamera diizinkan, lokasi tidak dipakai.
 
 ## Sumber data / rumus
 
@@ -47,13 +47,26 @@ Gaya visual mengikuti design system **AeroShift SPBU** (lihat `DESIGN.md`) — i
 
 ## Fitur
 
-**Baru di v2**
-- **Density @15°C otomatis** (item 2.2.f–2.2.l) memakai Tabel ASTM 53 dari aplikasi PANTAS (interpolasi bilinear, cadangan rumus ASTM 53B). Sampel pengiriman terakhir vs sampel saat audit dibandingkan otomatis terhadap toleransi ±0,003 → saran nilai A/F, plus peringatan bila sampel diambil < 2 jam setelah bongkar.
+**Baru di v3**
+- **Auditor** (menggantikan Koordinator), boleh lebih dari satu (Auditor 1, 2, …).
+- **Data operator per kategori shift**: Shift 1/2/3, **NS** (Normal Shift), **MD** (Middle Shift), **OFF**. Pilih shift yang bertugas saat audit → total sampel item operator (1.1.1.a/b/d, 1.1.2.a, 1.2.a–h) terisi otomatis; auditor cukup mengisi jumlah operator yang sesuai. Bila ada yang tidak sesuai, wajib mengisi **nama operator** tersebut (masuk ke Komentar Auditor).
+- **Jumlah nozzle + tombol Submit** → baris nozzle muncul dengan **dropdown nomor nozzle** (duplikat ditandai).
+- **UMK tahun lalu dihapus** (hanya UMK tahun ini).
+- **Density 2.2.f–2.2.l**: label "Hasil Density", "Hasil density pengiriman terakhir", "Hasil density sampel audit"; isian waktu bongkar dihapus.
+- **Tera 2.2.m mode P/M** (Preset/Manual) per nozzle.
+- **Submit → Edit**: item yang sudah disubmit terkunci (tombol kuning **Edit** untuk membuka lagi).
+- **Submit Laporan**: setelah 125 item tersubmit muncul tombol mengambang dengan animasi proses (cek item → hitung skor → validasi pinalti → simpan cloud) dan nomor laporan `PW/<SPBU>/<kode>`.
+- **Foto tanpa GPS**: pratinjau dulu (Ulangi / Gunakan Foto); dicap tanggal-jam, SPBU, item, auditor dan **kode verifikasi**. Sidik SHA-256 disimpan sehingga keaslian foto dapat dicek di penampil foto ("✓ Asli, belum diubah").
+- **Laporan PDF A4 vektor** (jsPDF + autotable) persis struktur Excel referensi `Audit_Pertamina_Way_SPBU_*.xlsx`: Ringkasan (Informasi SPBU, Kegiatan Audit, Total Score, Indikator, Rincian Sub-Elemen), Detail Checklist (warna nilai & skor per kelompok), Komentar Auditor (+ UMK/upah/BPJS, NFR, Komentar Manajer SPBU), Pengecekan Q&Q (nozzle, produk, P/M, tera, qty var, density), lampiran foto. Setiap kelompok diukur dulu dan dipindah utuh ke halaman berikutnya bila tidak muat — tidak ada kelompok yang terpisah halaman atau teks terpotong; header kolom diulang, footer berisi No. Report, kode verifikasi laporan & nomor halaman.
+- **Ringkasan teks dihapus**; tab Cloud diganti **landing page login** + tab **Akun**.
+
+**v2**
+- **Density @15°C otomatis** (item 2.2.f–2.2.l) memakai Tabel ASTM 53 dari aplikasi PANTAS (interpolasi bilinear, cadangan rumus ASTM 53B). Sampel pengiriman terakhir vs sampel saat audit dibandingkan otomatis terhadap toleransi ±0,003 → saran nilai A/F.
 - **Submit per item** — setiap item punya tombol Submit (validasi + simpan langsung); semua isian juga tersimpan otomatis. Status: Draft / Tersubmit / Ada perubahan.
 - **Dashboard Item Pinalti** — kartu per kategori (3S, Q&Q, RFS, VFC, EPO); diklik menampilkan daftar item pinalti kategori itu yang bisa langsung dinilai. Saat checklist pertama dibuka auditor ditanya mau cek pinalti dahulu atau tidak.
 - **Tipe Audit** dikosongkan (isian bebas, default kosong).
 - **Data operator & nozzle wajib** sebelum checklist: total operator, operator shift 1/2/3, jumlah nozzle, nomor & produk tiap nozzle. Data nozzle terintegrasi ke item 2.2.m **tera bejana 20 L** (batas −60 ml, cakupan 50% Good / 100% Excellent per produk).
-- **Foto GPS + timestamp** — foto hanya dari kamera langsung (tidak bisa dari galeri), wajib izin lokasi; setiap foto dicap tanggal-jam, koordinat, akurasi, nomor SPBU & kode item. Checklist tidak bisa dibuka tanpa GPS aktif.
+- **Foto kamera langsung** — tidak bisa dari galeri (v3: tanpa GPS, diganti kode verifikasi).
 - **Pencarian checklist** — ketik mis. "APAR" → muncul semua item terkait (APAR, APAB, masa berlaku, pelatihan pemadaman) lengkap dengan kategori/sub-elemen, bisa langsung dinilai atau dibuka di checklist.
 - Form: Sales Area, SBM, Verifikator & Auditor dihapus; "Manager SPBU" → **Area Business Head**.
 - **Syarat Excellent**: minimal 1 tenant internasional + 1 tenant nasional dengan izin prinsip berlaku.
@@ -69,14 +82,14 @@ Gaya visual mengikuti design system **AeroShift SPBU** (lihat `DESIGN.md`) — i
 - Grading A–F / N/A sesuai skala asli tiap item, dengan badge "PINALTI" untuk 21 item wajib.
 - 3 item bertingkat (Fast Track, Ragam Produk JBU, Kelengkapan NFR) punya input jumlah untuk membedakan syarat Good vs Excellent.
 - Skor & klasifikasi (Pasti Pas Good / Excellent / Belum Lulus) dihitung otomatis mengikuti rumus asli di Excel.
-- Laporan hasil audit otomatis + export PDF (html2canvas + jsPDF).
+- Laporan hasil audit otomatis + export PDF.
 - Riwayat audit tersimpan lokal per perangkat.
 
 ## Roadmap / rekomendasi pengembangan
 
 1. ~~Sinkronisasi cloud~~ — selesai di v2 (Cloudflare Worker + D1 + R2, offline-first).
 2. ~~Kalkulator Q&Q detail~~ — selesai di v2 (density @15°C & tera per nozzle).
-3. **Export ke Excel** — menghasilkan file dengan format yang sama persis dengan `SIMULASI_AUDIT_TERBARU_INTERTEK.xlsx` untuk arsip internal.
+3. **Export ke Excel** (PDF A4 sudah mengikuti format Excel laporan) — menghasilkan file dengan format yang sama persis dengan `SIMULASI_AUDIT_TERBARU_INTERTEK.xlsx` untuk arsip internal.
 4. **Alur approval berlapis** — Auditor → Verifikator → Koordinator dengan status & tanda tangan digital, sesuai kolom di laporan asli (Auditor 1/2, Verifikator, Koordinator, Acknowledge).
 5. Kemungkinan migrasi dari vanilla JS ke React/Vite/Tailwind (pola yang sama dipakai di project Bongkaran BBM) kalau aplikasi ini terus tumbuh dan butuh state management yang lebih rapi.
 
@@ -84,7 +97,7 @@ Gaya visual mengikuti design system **AeroShift SPBU** (lihat `DESIGN.md`) — i
 
 | Pengukuran | Hasil |
 |---|---|
-| Unduhan awal (JS + CSS, gzip) | ±64 KB (+ modul cloud 2 KB dimuat belakangan; PDF 177 KB hanya saat unduh PDF) |
+| Unduhan awal (JS + CSS, gzip) | ±68 KB (+ modul cloud 2 KB; modul PDF ±190 KB hanya dimuat saat unduh PDF) |
 | Aplikasi siap dipakai | ±0,8 detik |
 | Autosave audit berisi 60 foto | 8 ms (sebelumnya 209 ms) |
 | Buka elemen checklist (58 item) | ±110 ms (sebelumnya 670 ms) |

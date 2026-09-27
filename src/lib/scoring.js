@@ -47,6 +47,55 @@ export const TENANT_CATEGORIES = [
 
 export const TIERED_ITEMS = ['4.3.f', '5.1.f', '5.2.g']
 
+/* ----------------------------- Operator ------------------------------ */
+
+/** Kategori shift operator. OFF = sedang libur/tidak bertugas (tidak bisa jadi sampel). */
+export const SHIFTS = [
+  { id: 'S1', label: 'Shift 1' },
+  { id: 'S2', label: 'Shift 2' },
+  { id: 'S3', label: 'Shift 3' },
+  { id: 'NS', label: 'NS · Normal Shift' },
+  { id: 'MD', label: 'MD · Middle Shift' },
+  { id: 'OFF', label: 'OFF Shift' },
+]
+
+/**
+ * Item yang dinilai dari sampel operator. Total sampel diisi otomatis:
+ * - 'duty'  : operator yang bertugas saat audit (shift terpilih)
+ * - 'all'   : seluruh operator (mis. pelatihan pemadaman kebakaran)
+ */
+export const OPERATOR_ITEMS = {
+  '1.1.1.a': 'duty', '1.1.1.b': 'duty', '1.1.1.d': 'duty', '1.1.2.a': 'duty',
+  '1.2.a': 'duty', '1.2.b': 'duty', '1.2.c': 'duty', '1.2.d': 'duty', '1.2.e': 'duty',
+  '1.2.f': 'duty', '1.2.g': 'duty', '1.2.h': 'duty',
+  '3.1.4.t': 'all',
+}
+
+export function operatorCounts(audit) {
+  const o = (audit.info && audit.info.operators) || {}
+  const out = {}
+  SHIFTS.forEach((s) => { out[s.id] = parseAngka(o[s.id]) || 0 })
+  return out
+}
+
+export function operatorTotal(audit) {
+  return Object.values(operatorCounts(audit)).reduce((a, b) => a + b, 0)
+}
+
+/** Jumlah operator yang bertugas pada shift saat audit dilakukan. */
+export function operatorsOnDuty(audit) {
+  const c = operatorCounts(audit)
+  const duty = (audit.info && audit.info.shiftAudit) || []
+  return duty.filter((id) => id !== 'OFF').reduce((sum, id) => sum + (c[id] || 0), 0)
+}
+
+/** Total sampel otomatis untuk item operator (null bila bukan item operator). */
+export function operatorSampleTotal(audit, code) {
+  const kind = OPERATOR_ITEMS[code]
+  if (!kind) return null
+  return kind === 'all' ? operatorTotal(audit) : operatorsOnDuty(audit)
+}
+
 /* ------------------------------------------------------------------ */
 
 /** Skala dari Excel sumber, mis. "A/C/F/X": N/A (X) hanya boleh bila skala memuat X. */
@@ -90,7 +139,7 @@ export function getResult(audit, code) {
  * Evaluasi item density: D15 sampel pengiriman terakhir vs D15 sampel saat audit.
  * Selisih harus dalam ±0,003.
  */
-export function evalDensity(result, now = Date.now()) {
+export function evalDensity(result) {
   const d = (result && result.density) || {}
   const refCalc = density15(d.refObs, d.refSuhu)
   const refD15 = refCalc ? refCalc.value : normalizeDensity(d.refD15Manual)
@@ -98,15 +147,8 @@ export function evalDensity(result, now = Date.now()) {
   const auditD15 = auditCalc ? auditCalc.value : null
   const selisih = refD15 !== null && auditD15 !== null ? round4(auditD15 - refD15) : null
   const ok = selisih === null ? null : Math.abs(selisih) <= DENSITY_TOLERANCE + 1e-9
-  let jamSetelahBongkar = null
-  if (d.waktuBongkar) {
-    const t = new Date(d.waktuBongkar).getTime()
-    if (Number.isFinite(t)) jamSetelahBongkar = (now - t) / 3600000
-  }
   return {
     refCalc, refD15, auditCalc, auditD15, selisih, ok,
-    jamSetelahBongkar,
-    terlaluCepat: jamSetelahBongkar !== null && jamSetelahBongkar >= 0 && jamSetelahBongkar < 2,
     autoGrade: ok === null ? null : ok ? 'A' : 'F',
   }
 }
@@ -128,11 +170,14 @@ export function productsFromNozzles(audit) {
  */
 export function evalTera(audit) {
   const level = (audit.info && audit.info.kelasTarget) || 'good'
-  const tera = (getResult(audit, TERA_ITEM).tera) || {}
+  const res = getResult(audit, TERA_ITEM)
+  const tera = res.tera || {}
+  const modes = res.teraMode || {}
   const nozzles = nozzleList(audit)
   const rows = nozzles.map((n) => {
     const ml = parseAngka(tera[n.id])
-    return { ...n, ml, tested: ml !== null, ok: ml === null ? null : ml >= TERA_LIMIT_ML }
+    // Mode pengujian: P = Preset (angka volume disetel di dispenser), M = Manual
+    return { ...n, ml, mode: modes[n.id] || 'P', qtyVar: ml === null ? null : ml / 20000, tested: ml !== null, ok: ml === null ? null : ml >= TERA_LIMIT_ML }
   })
   const byProduct = {}
   rows.forEach((r) => {

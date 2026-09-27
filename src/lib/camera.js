@@ -1,62 +1,25 @@
 /**
- * Kamera + GPS + timestamp.
+ * Kamera + timestamp + kode verifikasi keabsahan.
  *
  * - Foto hanya bisa diambil langsung dari kamera (getUserMedia), tidak ada
  *   pilihan galeri sama sekali.
- * - Foto wajib punya titik GPS: tombol jepret baru aktif setelah lokasi
- *   didapat, dan izin lokasi harus diizinkan di HP.
- * - Setiap foto dicap (stamp) tanggal, jam, koordinat, akurasi, nomor SPBU
- *   dan kode item langsung di gambar.
+ * - Setiap foto dicap (stamp) tanggal-jam, nomor SPBU, kode item, nama auditor
+ *   dan KODE VERIFIKASI unik langsung di gambar.
+ * - Setelah jepret muncul pratinjau: "Ulangi" atau "Gunakan Foto".
+ * - Sidik jari SHA-256 file foto disimpan; `verifyPhoto()` memeriksa bahwa file
+ *   belum diubah sejak diambil.
  */
 import { canvasThumb } from './photos.js'
 
-export class GpsError extends Error {
+export class CameraError extends Error {
   constructor(code, message) {
     super(message)
     this.code = code
   }
 }
 
-export function gpsSupported() {
-  return typeof navigator !== 'undefined' && 'geolocation' in navigator
-}
-
 export function cameraSupported() {
   return typeof navigator !== 'undefined' && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
-}
-
-export async function gpsPermissionState() {
-  try {
-    if (!navigator.permissions) return 'unknown'
-    const st = await navigator.permissions.query({ name: 'geolocation' })
-    return st.state
-  } catch {
-    return 'unknown'
-  }
-}
-
-function toPos(p) {
-  return { lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.round(p.coords.accuracy), ts: p.timestamp || Date.now() }
-}
-
-function gpsErrorFrom(err) {
-  if (!window.isSecureContext) return new GpsError('insecure', 'Lokasi hanya tersedia lewat HTTPS.')
-  if (err && err.code === 1) return new GpsError('denied', 'Izin lokasi (GPS) ditolak.')
-  if (err && err.code === 3) return new GpsError('timeout', 'Lokasi GPS belum didapat (timeout). Pastikan GPS aktif lalu coba lagi.')
-  return new GpsError('unavailable', 'Lokasi GPS tidak tersedia. Aktifkan GPS/Location di HP.')
-}
-
-/** Minta lokasi sekali. Memunculkan dialog izin browser bila belum pernah diizinkan. */
-export function requireGps(timeout = 20000) {
-  return new Promise((resolve, reject) => {
-    if (!gpsSupported()) return reject(new GpsError('unsupported', 'Perangkat/browser tidak mendukung GPS.'))
-    if (!window.isSecureContext) return reject(new GpsError('insecure', 'Lokasi hanya tersedia lewat HTTPS.'))
-    navigator.geolocation.getCurrentPosition(
-      (p) => resolve(toPos(p)),
-      (e) => reject(gpsErrorFrom(e)),
-      { enableHighAccuracy: true, timeout, maximumAge: 30000 },
-    )
-  })
 }
 
 function pad(n) { return String(n).padStart(2, '0') }
@@ -70,16 +33,40 @@ export function formatStampTime(ts) {
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${tz ? ' ' + tz : ''}`
 }
 
-export function formatCoord(pos) {
-  if (!pos) return '—'
-  return `${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)} (±${pos.acc} m)`
+async function sha256Hex(data) {
+  const buf = typeof data === 'string' ? new TextEncoder().encode(data) : data
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', buf))
+  return [...d].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** Kode verifikasi 8 karakter (mis. "7F3A-91C2") dari data foto + nonce acak. */
+async function makeVerifyCode(parts) {
+  const nonce = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, '0')).join('')
+  const h = await sha256Hex([...parts, nonce].join('|'))
+  return h.slice(0, 8).toUpperCase().replace(/^(.{4})/, '$1-')
+}
+
+/** Hitung SHA-256 blob. */
+export async function blobSha256(blob) {
+  return sha256Hex(await blob.arrayBuffer())
+}
+
+/**
+ * Periksa keabsahan foto: file yang tersimpan sama persis dengan saat dijepret.
+ * Mengembalikan 'valid' | 'changed' | 'unknown' (foto lama tanpa sidik jari).
+ */
+export async function verifyPhoto(meta, blob) {
+  if (!meta || !meta.sha256 || !blob) return 'unknown'
+  const h = await blobSha256(blob)
+  // cloudSha256 = salinan terkompres yang diunggah ke cloud (foto hasil unduh dari cloud)
+  return h === meta.sha256 || (meta.cloudSha256 && h === meta.cloudSha256) ? 'valid' : 'changed'
 }
 
 function drawStamp(ctx, w, h, lines) {
   const fs = Math.max(14, Math.round(w / 42))
-  const pad = Math.round(fs * 0.6)
+  const padPx = Math.round(fs * 0.6)
   const lh = Math.round(fs * 1.35)
-  const boxH = pad * 2 + lh * lines.length
+  const boxH = padPx * 2 + lh * lines.length
   ctx.fillStyle = 'rgba(0,0,0,0.55)'
   ctx.fillRect(0, h - boxH, w, boxH)
   ctx.fillStyle = '#FFD200'
@@ -88,24 +75,22 @@ function drawStamp(ctx, w, h, lines) {
   lines.forEach((line, i) => {
     ctx.font = `${i === 0 ? '700' : '500'} ${fs}px "JetBrains Mono", ui-monospace, monospace`
     ctx.fillStyle = '#fff'
-    ctx.fillText(line, pad + 6, h - boxH + pad + i * lh, w - pad * 2)
+    ctx.fillText(line, padPx + 6, h - boxH + padPx + i * lh, w - padPx * 2)
   })
 }
 
+const escHtml = (s) => String(s || '').replace(/[<>&"]/g, '')
+
 /**
- * Buka kamera layar penuh. Resolve dengan foto `{blob, thumb, ts, lat, lng, acc}`
- * atau null bila dibatalkan. Reject bila kamera/GPS tidak bisa dipakai.
+ * Buka kamera layar penuh. Resolve dengan `{blob, thumb, ts, code, sha256, auditor}`
+ * atau null bila dibatalkan. Reject bila kamera tidak bisa dipakai.
  */
-export function captureStampedPhoto({ label = '', spbu = '' } = {}) {
+export function captureStampedPhoto({ label = '', spbu = '', auditor = '' } = {}) {
   return new Promise((resolve, reject) => {
     if (!cameraSupported()) {
-      reject(new GpsError('nocamera', window.isSecureContext
+      reject(new CameraError('nocamera', window.isSecureContext
         ? 'Kamera tidak tersedia di browser ini.'
-        : 'Kamera hanya bisa dipakai lewat HTTPS (buka aplikasi dari link Vercel).'))
-      return
-    }
-    if (!gpsSupported()) {
-      reject(new GpsError('unsupported', 'Perangkat/browser tidak mendukung GPS.'))
+        : 'Kamera hanya bisa dipakai lewat HTTPS (buka aplikasi dari link resmi).'))
       return
     }
 
@@ -114,26 +99,34 @@ export function captureStampedPhoto({ label = '', spbu = '' } = {}) {
     root.innerHTML = `
       <div class="cam-top">
         <button class="cam-x" data-cam="cancel" aria-label="Tutup">&times;</button>
-        <div class="cam-title">${label.replace(/[<>&"]/g, '')}</div>
+        <div class="cam-title">${escHtml(label)}</div>
       </div>
       <video class="cam-video" autoplay playsinline muted></video>
+      <img class="cam-preview" alt="Pratinjau foto" hidden>
       <div class="cam-info">
-        <div class="cam-gps" data-cam="gps">Mencari lokasi GPS…</div>
         <div class="cam-time" data-cam="time"></div>
+        <div class="cam-sub">${escHtml([spbu ? `SPBU ${spbu}` : '', auditor].filter(Boolean).join(' · '))}</div>
       </div>
-      <div class="cam-bottom">
+      <div class="cam-bottom" data-stage="live">
         <button class="cam-shutter" data-cam="shoot" disabled aria-label="Ambil foto"></button>
+      </div>
+      <div class="cam-bottom cam-actions" data-stage="preview" hidden>
+        <button class="cam-btn ghost" data-cam="retake">Ulangi</button>
+        <button class="cam-btn" data-cam="use">Gunakan Foto</button>
       </div>`
     document.body.appendChild(root)
 
     const video = root.querySelector('video')
-    const gpsEl = root.querySelector('[data-cam="gps"]')
+    const preview = root.querySelector('.cam-preview')
     const timeEl = root.querySelector('[data-cam="time"]')
     const shoot = root.querySelector('[data-cam="shoot"]')
+    const liveBar = root.querySelector('[data-stage="live"]')
+    const previewBar = root.querySelector('[data-stage="preview"]')
+    const infoBox = root.querySelector('.cam-info')
     let stream = null
-    let watchId = null
-    let pos = null
     let done = false
+    let pending = null // hasil jepretan menunggu konfirmasi
+    let previewUrl = null
 
     const clock = setInterval(() => { timeEl.textContent = formatStampTime(Date.now()) }, 500)
     timeEl.textContent = formatStampTime(Date.now())
@@ -141,34 +134,23 @@ export function captureStampedPhoto({ label = '', spbu = '' } = {}) {
     function cleanup() {
       done = true
       clearInterval(clock)
-      if (watchId !== null) navigator.geolocation.clearWatch(watchId)
       if (stream) stream.getTracks().forEach((t) => t.stop())
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
       root.remove()
     }
     function updateShutter() {
-      shoot.disabled = !(pos && stream && video.videoWidth)
+      shoot.disabled = !(stream && video.videoWidth)
+    }
+    function showStage(stage) {
+      const isPreview = stage === 'preview'
+      video.hidden = isPreview
+      preview.hidden = !isPreview
+      liveBar.hidden = isPreview
+      previewBar.hidden = !isPreview
+      infoBox.hidden = isPreview
     }
     video.addEventListener('loadeddata', updateShutter)
     video.addEventListener('playing', updateShutter)
-
-    watchId = navigator.geolocation.watchPosition(
-      (p) => {
-        pos = toPos(p)
-        gpsEl.textContent = `GPS ${formatCoord(pos)}`
-        gpsEl.classList.add('ok')
-        updateShutter()
-      },
-      (e) => {
-        const err = gpsErrorFrom(e)
-        if (err.code === 'denied' || err.code === 'insecure') {
-          cleanup()
-          reject(err)
-          return
-        }
-        gpsEl.textContent = err.message
-      },
-      { enableHighAccuracy: true, timeout: 30000, maximumAge: 10000 },
-    )
 
     navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
       .then((s) => {
@@ -179,39 +161,63 @@ export function captureStampedPhoto({ label = '', spbu = '' } = {}) {
       })
       .catch((e) => {
         cleanup()
-        reject(new GpsError('camera', e && e.name === 'NotAllowedError'
+        reject(new CameraError('camera', e && e.name === 'NotAllowedError'
           ? 'Izin kamera ditolak. Izinkan akses kamera untuk situs ini di pengaturan browser.'
           : 'Kamera tidak bisa dibuka: ' + (e && e.message ? e.message : e)))
       })
 
-    root.addEventListener('click', (ev) => {
+    async function takeShot() {
+      const maxW = 1280
+      const scale = Math.min(1, maxW / video.videoWidth)
+      const w = Math.round(video.videoWidth * scale)
+      const h = Math.round(video.videoHeight * scale)
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(video, 0, 0, w, h)
+      const ts = Date.now()
+      const code = await makeVerifyCode([ts, spbu, label, auditor])
+      drawStamp(ctx, w, h, [
+        formatStampTime(ts),
+        [spbu ? `SPBU ${spbu}` : '', label].filter(Boolean).join(' · '),
+        [auditor ? `Auditor: ${auditor}` : '', `Kode verifikasi: ${code}`].filter(Boolean).join(' · '),
+      ])
+      const thumb = canvasThumb(canvas, w, h)
+      const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.7))
+      if (!blob) throw new CameraError('camera', 'Gagal menyimpan foto.')
+      const sha256 = await blobSha256(blob)
+      return { blob, thumb, ts, code, sha256, auditor }
+    }
+
+    root.addEventListener('click', async (ev) => {
       const act = ev.target.closest('[data-cam]')?.dataset.cam
-      if (act === 'cancel') { cleanup(); resolve(null) }
-      if (act === 'shoot' && pos && stream && video.videoWidth) {
-        const maxW = 1280
-        const scale = Math.min(1, maxW / video.videoWidth)
-        const w = Math.round(video.videoWidth * scale)
-        const h = Math.round(video.videoHeight * scale)
-        const canvas = document.createElement('canvas')
-        canvas.width = w
-        canvas.height = h
-        const ctx = canvas.getContext('2d')
-        ctx.drawImage(video, 0, 0, w, h)
-        const ts = Date.now()
-        drawStamp(ctx, w, h, [
-          formatStampTime(ts),
-          `Lat/Long ${formatCoord(pos)}`,
-          [spbu ? `SPBU ${spbu}` : '', label].filter(Boolean).join(' · '),
-        ])
-        const thumb = canvasThumb(canvas, w, h)
-        const coords = { lat: pos.lat, lng: pos.lng, acc: pos.acc }
-        canvas.toBlob((blob) => {
+      if (act === 'cancel') { cleanup(); resolve(null); return }
+      if (act === 'shoot' && stream && video.videoWidth && !shoot.disabled) {
+        shoot.disabled = true
+        try {
+          pending = await takeShot()
+          if (previewUrl) URL.revokeObjectURL(previewUrl)
+          previewUrl = URL.createObjectURL(pending.blob)
+          preview.src = previewUrl
+          showStage('preview')
+        } catch (e) {
           cleanup()
-          if (!blob) { reject(new GpsError('camera', 'Gagal menyimpan foto.')); return }
-          resolve({ blob, thumb, ts, ...coords })
-        }, 'image/jpeg', 0.7)
+          reject(e)
+        }
+        return
+      }
+      if (act === 'retake') {
+        pending = null
+        showStage('live')
+        updateShutter()
+        return
+      }
+      if (act === 'use' && pending) {
+        const out = pending
+        cleanup()
+        resolve(out)
       }
     })
   })
 }
-

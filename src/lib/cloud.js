@@ -11,6 +11,7 @@
  */
 import { photoLists, photoBlob, newPhotoId, thumbFromBlob } from './photos.js'
 import { putPhoto } from './storage.js'
+import { blobSha256 } from './camera.js'
 
 const LS_URL = 'audit_api_url'
 const LS_TOKEN = 'audit_api_token'
@@ -163,6 +164,8 @@ async function uploadPendingPhotos(audit) {
       const original = await photoBlob(p)
       if (!original) continue
       const blob = await compressForCloud(original)
+      // Salinan cloud dikompres ulang → simpan sidik jarinya juga agar tetap bisa diverifikasi setelah diunduh
+      if (p.sha256) p.cloudSha256 = blob === original ? p.sha256 : await blobSha256(blob)
       if (!p.id) p.id = newPhotoId()
       const { path } = await api('PUT', `/api/photos/${encodeURIComponent(audit.id)}/${encodeURIComponent(p.id)}`, { raw: blob })
       p.path = path

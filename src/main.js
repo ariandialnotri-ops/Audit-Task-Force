@@ -2,16 +2,18 @@ import './styles.css'
 import { CHECKLIST_TREE, PINALTI_META } from './data/checklist.js'
 import { GUIDELINE } from './data/guideline.js'
 import {
-  ALL_ITEMS, TOTAL_ITEM_COUNT, ITEM_BY_CODE, ELEMENT_MIN, TS_MIN, PRODUCTS,
+  ALL_ITEMS, TOTAL_ITEM_COUNT, ITEM_BY_CODE, PRODUCTS,
   DENSITY_ITEMS, TERA_ITEM, TERA_LIMIT_ML, TENANT_ITEM, TENANT_CATEGORIES,
-  emptyResult, getResult, computeAudit, scaleLabel, reasonsForFail, evalDensity, evalTera, evalTenants,
-  productsFromNozzles, searchItems, gradeFromPct, teraGradeByTable,
+  emptyResult, getResult, computeAudit, scaleLabel, evalDensity, evalTera, evalTenants,
+  productsFromNozzles, searchItems, gradeFromPct,
+  SHIFTS, OPERATOR_ITEMS, operatorTotal, operatorsOnDuty, operatorSampleTotal,
 } from './lib/scoring.js'
 import { DENSITY_TOLERANCE, METHOD_LABEL } from './lib/density.js'
-import { formatDensity, formatSigned, formatNumber, parseAngka } from './lib/format.js'
+import { formatDensity, formatSigned, parseAngka } from './lib/format.js'
 import { loadAll, scheduleSave, flushSave, flushAll, deleteAudit } from './lib/storage.js'
-import { requireGps, captureStampedPhoto, formatStampTime, formatCoord } from './lib/camera.js'
-import { thumbSrc, fullUrl, storeNewPhoto, removePhotoFiles, migrateAuditPhotos, photoLists } from './lib/photos.js'
+import { captureStampedPhoto, formatStampTime, verifyPhoto } from './lib/camera.js'
+import { thumbSrc, fullUrl, storeNewPhoto, removePhotoFiles, migrateAuditPhotos, photoLists, photoBlob } from './lib/photos.js'
+import { buildReport, fmtPct, fmtSkor } from './lib/report.js'
 
 /* =========================================================
    STATE
@@ -24,6 +26,7 @@ let noteOpenSet = new Set()
 const critOpenSet = new Set()
 let searchQuery = ''
 let pinaltiFilter = null // null | 'all' | elCode
+let nozzleDraft = null // isian "Jumlah Nozzle" sebelum ditekan Submit
 
 /* Cloud (Cloudflare Worker + D1 + R2) — modul dimuat dinamis setelah tampilan pertama. */
 const cloud = {
@@ -32,6 +35,7 @@ const cloud = {
   message: '', lastSync: null, needsSetup: false,
   remote: null, remoteLoading: false, remoteError: '',
   members: null, remoteFilter: '', usage: null,
+  ready: false, loadError: '', // ready = status login sudah diperiksa (landing page ditampilkan sampai login)
 }
 
 const contentEl = () => document.getElementById('content')
@@ -44,25 +48,48 @@ function defaultInfo() {
   return {
     nomorSpbu: '', region: '', kota: '', alamat: '', namaPemilik: 'PT. PERTAMINA RETAIL', areaBusinessHead: '',
     tipeKepemilikan: 'COCO', tahun: new Date().getFullYear().toString(), telepon: '',
-    tanggalAudit: new Date().toISOString().slice(0, 10), tipeAudit: '', koordinator: '', kelasTarget: 'good',
-    operatorTotal: '', operatorShift1: '', operatorShift2: '', operatorShift3: '',
+    tanggalAudit: new Date().toISOString().slice(0, 10), tipeAudit: '', kelasTarget: 'good',
+    auditors: [''],
+    operators: { S1: '', S2: '', S3: '', NS: '', MD: '', OFF: '' },
+    shiftAudit: [],
     nozzles: [],
-    umkTahunIni: '', umkTahunLalu: '', upahOperator: '', hariKerja: '', bpjs: '',
+    umkTahunIni: '', upahOperator: '', hariKerja: '', bpjs: '',
+    komentarManajer: '',
   }
 }
 
 /** Lengkapi audit lama (v1) dengan field baru. */
 function normalizeAudit(a) {
   a.info = { ...defaultInfo(), ...(a.info || {}) }
-  if (!a.info.areaBusinessHead && a.info.namaManager) a.info.areaBusinessHead = a.info.namaManager
-  if (!Array.isArray(a.info.nozzles)) a.info.nozzles = []
+  const i = a.info
+  if (!i.areaBusinessHead && i.namaManager) i.areaBusinessHead = i.namaManager
+  if (!Array.isArray(i.nozzles)) i.nozzles = []
+  // v2 → v3: Koordinator → daftar Auditor
+  if (!Array.isArray(i.auditors) || !i.auditors.length) i.auditors = [i.koordinator || '']
+  delete i.koordinator
+  // v2 → v3: operatorShift1..3 → operators per kategori shift
+  i.operators = { S1: '', S2: '', S3: '', NS: '', MD: '', OFF: '', ...(i.operators || {}) }
+  ;[['operatorShift1', 'S1'], ['operatorShift2', 'S2'], ['operatorShift3', 'S3']].forEach(([old, id]) => {
+    if (i[old] !== undefined) { if (!i.operators[id]) i.operators[id] = i[old]; delete i[old] }
+  })
+  delete i.operatorTotal
+  delete i.umkTahunLalu
+  if (!Array.isArray(i.shiftAudit)) i.shiftAudit = []
   a.results = a.results || {}
+  Object.values(a.results).forEach((r) => { delete r.changedAfterSubmit })
   return a
+}
+
+function currentUserName() {
+  const u = cloud.session && cloud.session.user
+  return u ? (u.nama || u.email || '') : ''
 }
 
 function newAudit() {
   const id = uid()
-  AUDITS[id] = { id, version: 2, createdAt: Date.now(), updatedAt: Date.now(), status: 'draft', info: defaultInfo(), results: {} }
+  const info = defaultInfo()
+  info.auditors = [currentUserName()]
+  AUDITS[id] = { id, version: 3, createdAt: Date.now(), updatedAt: Date.now(), status: 'draft', info, results: {} }
   persist(id)
   return id
 }
@@ -84,7 +111,6 @@ function setResult(code, patch) {
   if (!a.results[code]) a.results[code] = emptyResult()
   const r = a.results[code]
   Object.assign(r, patch)
-  if (r.submittedAt && !('submittedAt' in patch)) r.changedAfterSubmit = true
   persist(a.id)
   return r
 }
@@ -153,8 +179,8 @@ const iconHistory = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 const iconInfo = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5"/><path d="M12 8h.01"/></svg>`
 const iconCamera = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8a2 2 0 0 1 2-2h1.2a1 1 0 0 0 .83-.45L9 4h6l.97 1.55a1 1 0 0 0 .83.45H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8z"/><circle cx="12" cy="13" r="3.2"/></svg>`
 const iconSearch = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>`
+const iconUser = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>`
 const iconCloud = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.1 9.2 4.5 4.5 0 0 0 7 18z"/></svg>`
-const iconPin = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>`
 
 /* =========================================================
    ROUTER / RENDER
@@ -167,23 +193,31 @@ function go(view, params) {
 }
 
 function render() {
+  const c = contentEl()
+  const landing = !cloud.ready || !cloud.session
+  document.body.classList.toggle('landing-mode', landing)
+  if (landing) {
+    document.getElementById('tabbar').innerHTML = ''
+    document.getElementById('topbar').innerHTML = ''
+    c.innerHTML = cloud.ready ? viewLanding() : `<div class="landing-splash"><div class="brand-mark">PW</div><div class="spinner"></div></div>`
+    return
+  }
   renderTabbar()
   renderTopbar()
-  const c = contentEl()
   if (currentView === 'home') c.innerHTML = viewHome()
   else if (currentView === 'history') c.innerHTML = viewHistory()
   else if (currentView === 'form') c.innerHTML = viewForm()
   else if (currentView === 'checklist') c.innerHTML = viewChecklist()
   else if (currentView === 'report') { c.innerHTML = viewReport(); hydrateFullPhotos() }
   else if (currentView === 'about') c.innerHTML = viewAbout()
-  else if (currentView === 'cloud') c.innerHTML = viewCloud()
+  else if (currentView === 'account') c.innerHTML = viewAccount()
 }
 
 function renderTabbar() {
   const tabs = [
     { id: 'home', label: 'Beranda', icon: iconHome },
     { id: 'history', label: 'Riwayat', icon: iconHistory },
-    { id: 'cloud', label: 'Cloud', icon: iconCloud },
+    { id: 'account', label: 'Akun', icon: iconUser },
     { id: 'about', label: 'Panduan', icon: iconInfo },
   ]
   document.getElementById('tabbar').innerHTML = tabs.map((t) => `
@@ -197,7 +231,7 @@ function renderTopbar() {
   if (currentView === 'home') { tb.innerHTML = `<h1 style="text-align:left;flex:1;">Audit Pertamina Way</h1>`; return }
   if (currentView === 'history') { tb.innerHTML = `<h1 style="text-align:left;flex:1;">Riwayat Audit</h1>`; return }
   if (currentView === 'about') { tb.innerHTML = `<h1 style="text-align:left;flex:1;">Panduan</h1>`; return }
-  if (currentView === 'cloud') { tb.innerHTML = `<h1 style="text-align:left;flex:1;">Cloud &amp; Rekap</h1>`; return }
+  if (currentView === 'account') { tb.innerHTML = `<h1 style="text-align:left;flex:1;">Akun &amp; Rekap</h1>`; return }
   if (currentView === 'form') {
     tb.innerHTML = `<button class="back" data-back="home">&#8249; Kembali</button><h1>Data SPBU</h1><span style="width:70px"></span>`
     return
@@ -238,8 +272,8 @@ function viewHome() {
   return `
   <div class="hero">
     <h1>Audit Pertamina Way</h1>
-    <p>Checklist Pasti Pas &middot; foto GPS ber-timestamp &middot; skor real-time</p>
-    <div class="cloud-line" data-tab="cloud">${cloudLineHtml()}</div>
+    <p>Checklist Pasti Pas &middot; foto ber-timestamp &amp; kode verifikasi &middot; skor real-time</p>
+    <div class="cloud-line" data-tab="account">${cloudLineHtml()}</div>
   </div>
   <button class="btn-primary" data-action="newaudit" style="margin-bottom:18px;">+ Mulai Audit SPBU Baru</button>
 
@@ -272,32 +306,49 @@ function infoInput(key, label, opts = {}) {
   return `<div class="field"><label>${label}</label><input data-info="${key}" value="${esc(i[key])}"${opts.type ? ` type="${opts.type}"` : ''}${opts.inputmode ? ` inputmode="${opts.inputmode}"` : ''}${opts.placeholder ? ` placeholder="${esc(opts.placeholder)}"` : ''}></div>`
 }
 
-function operatorHint(i) {
-  const total = parseAngka(i.operatorTotal)
-  const s = [i.operatorShift1, i.operatorShift2, i.operatorShift3].map(parseAngka)
-  if (total === null || s.some((x) => x === null)) return 'Isi total operator dan jumlah operator tiap shift.'
-  const sum = s.reduce((x, y) => x + y, 0)
-  if (sum !== total) return `<span style="color:var(--status-poor)">Jumlah shift 1+2+3 = ${sum}, berbeda dengan total operator (${total}). Periksa kembali bila tidak ada operator rangkap shift.</span>`
-  return `<span style="color:var(--status-good)">✓ Shift 1+2+3 = ${sum} sesuai total operator.</span>`
+function operatorSummaryHtml(a) {
+  const total = operatorTotal(a)
+  const duty = operatorsOnDuty(a)
+  const dutyLabels = (a.info.shiftAudit || []).map((id) => (SHIFTS.find((x) => x.id === id) || {}).label || id)
+  return `<div class="op-sum">
+    <div><span>Total operator</span><b>${total}</b></div>
+    <div><span>Bertugas saat audit</span><b>${duty}</b></div>
+  </div>
+  <div class="hint">${dutyLabels.length ? `Sampel item operator otomatis = <b>${duty}</b> operator (${dutyLabels.map(esc).join(' + ')}).` : 'Pilih shift yang sedang bertugas saat audit — jumlahnya otomatis menjadi total sampel di checklist.'}</div>`
 }
 
 function viewForm() {
   const a = curAudit()
   const i = a.info
   const nozzles = i.nozzles
-  const nozzleRows = nozzles.map((n, idx) => `
+  const nozzleCount = nozzles.length
+  // Pilihan nomor nozzle: 1..max(jumlah nozzle, nomor terbesar yang sudah dipakai)
+  const maxNo = Math.max(nozzleCount, ...nozzles.map((n) => parseInt(n.nomor, 10) || 0))
+  const nomorOptions = Array.from({ length: maxNo }, (_, k) => String(k + 1))
+  const usedNo = nozzles.map((n) => String(n.nomor || ''))
+  const nozzleRows = nozzles.map((n, idx) => {
+    const dup = n.nomor && usedNo.filter((x) => x === String(n.nomor)).length > 1
+    return `
     <div class="nozzle-row">
       <span class="nozzle-idx">${idx + 1}</span>
-      <div class="field"><label>Nomor Nozzle</label><input data-nozzle="${n.id}" data-nf="nomor" value="${esc(n.nomor)}" placeholder="cth. ${idx + 1}"></div>
+      <div class="field"><label>Nomor Nozzle</label>
+        <select data-nozzle="${n.id}" data-nf="nomor" class="${dup ? 'dup' : ''}">
+          <option value="">— no —</option>
+          ${nomorOptions.map((no) => `<option value="${no}" ${String(n.nomor) === no ? 'selected' : ''}>Nozzle ${no}</option>`).join('')}
+        </select>
+      </div>
       <div class="field"><label>Produk</label>
         <select data-nozzle="${n.id}" data-nf="produk">
           <option value="">— pilih —</option>
           ${PRODUCTS.map((p) => `<option ${n.produk === p ? 'selected' : ''}>${p}</option>`).join('')}
         </select>
       </div>
-    </div>`).join('')
+    </div>`
+  }).join('')
 
   const perProduct = PRODUCTS.map((p) => [p, nozzles.filter((n) => n.produk === p).length]).filter(([, c]) => c > 0)
+  const draft = nozzleDraft !== null ? nozzleDraft : (nozzleCount || '')
+  const auditors = i.auditors && i.auditors.length ? i.auditors : ['']
 
   return `
   <div class="section-title">Informasi SPBU</div>
@@ -327,37 +378,45 @@ function viewForm() {
         <option value="excellent" ${i.kelasTarget === 'excellent' ? 'selected' : ''}>Pasti Pas Excellent</option>
       </select>
     </div>
-    ${infoInput('koordinator', 'Koordinator')}
+    ${auditors.map((nm, k) => `
+      <div class="auditor-row">
+        <div class="field"><label>Auditor ${k + 1}</label><input data-auditor="${k}" value="${esc(nm)}" placeholder="Nama auditor"></div>
+        ${auditors.length > 1 ? `<button class="icon-btn danger" data-rmauditor="${k}" aria-label="Hapus auditor ${k + 1}">&times;</button>` : ''}
+      </div>`).join('')}
+    <button class="btn-ghost small" data-action="addauditor">+ Tambah Auditor</button>
   </div>
 
   <div class="section-title">Data Operator <span class="req">wajib</span></div>
   <div class="card">
-    ${infoInput('operatorTotal', 'Total Operator', { type: 'number', inputmode: 'numeric' })}
-    <div class="field-row">
-      ${infoInput('operatorShift1', 'Shift 1', { type: 'number', inputmode: 'numeric' })}
-      ${infoInput('operatorShift2', 'Shift 2', { type: 'number', inputmode: 'numeric' })}
-      ${infoInput('operatorShift3', 'Shift 3', { type: 'number', inputmode: 'numeric' })}
+    <div class="shift-grid">
+      ${SHIFTS.map((sh) => `<div class="field"><label>${sh.label}</label><input type="number" min="0" inputmode="numeric" data-op="${sh.id}" value="${esc(i.operators[sh.id])}" placeholder="0"></div>`).join('')}
     </div>
-    <div class="hint" id="opHint">${operatorHint(i)}</div>
+    <div class="calc-sec" style="margin-top:4px">Shift bertugas saat audit</div>
+    <div class="chip-row">
+      ${SHIFTS.filter((sh) => sh.id !== 'OFF').map((sh) => `<button class="choice-chip ${i.shiftAudit.includes(sh.id) ? 'on' : ''}" data-shiftaudit="${sh.id}">${sh.id === 'NS' || sh.id === 'MD' ? sh.id : sh.label}</button>`).join('')}
+    </div>
+    <div id="opSummary">${operatorSummaryHtml(a)}</div>
   </div>
 
   <div class="section-title">Data Nozzle <span class="req">wajib</span></div>
   <div class="card">
-    <div class="field"><label>Jumlah Nozzle</label><input type="number" min="0" max="80" inputmode="numeric" data-action-change="nozzlecount" value="${nozzles.length || ''}" placeholder="cth. 8"></div>
-    ${nozzleRows}
+    <div class="nozzle-count">
+      <div class="field"><label>Jumlah Nozzle</label><input type="number" min="1" max="80" inputmode="numeric" id="nozzleCount" value="${esc(draft)}" placeholder="cth. 8"></div>
+      <button class="btn-mini" data-action="nozzlesubmit">${nozzleCount ? 'Perbarui' : 'Submit'}</button>
+    </div>
+    ${nozzleCount ? `<div class="calc-sec">Nomor &amp; produk tiap nozzle</div>${nozzleRows}` : '<div class="hint">Isi jumlah nozzle lalu tekan <b>Submit</b> — daftar nozzle dengan pilihan nomor akan muncul.</div>'}
     ${perProduct.length ? `<div class="hint">${perProduct.map(([p, c]) => `${esc(p)}: <b>${c}</b>`).join(' &middot; ')}</div>` : ''}
-    <div class="hint">Data nozzle dipakai langsung untuk penilaian tera bejana ukur 20 liter (item 2.2.m, batas −60 ml) dan untuk cek produk density.</div>
+    <div class="hint">Data nozzle dipakai untuk penilaian tera bejana ukur 20 liter (item 2.2.m, batas −60 ml) dan tabel Pengecekan Q&amp;Q di laporan.</div>
   </div>
 
   <div class="section-title">Data Ketenagakerjaan (opsional)</div>
   <div class="card">
-    <div class="field-row">${infoInput('umkTahunIni', 'UMK Tahun Ini (Rp)', { inputmode: 'numeric' })}${infoInput('umkTahunLalu', 'UMK Tahun Lalu (Rp)', { inputmode: 'numeric' })}</div>
+    ${infoInput('umkTahunIni', 'UMK Tahun Ini (Rp)', { inputmode: 'numeric' })}
     <div class="field-row">${infoInput('upahOperator', 'Upah Operator (Rp)', { inputmode: 'numeric' })}${infoInput('hariKerja', 'Hari Kerja/bulan', { inputmode: 'numeric' })}</div>
     ${infoInput('bpjs', 'Bukti bayar/kepesertaan BPJS', { placeholder: 'Tersedia / Tidak tersedia' })}
   </div>
 
   <button class="btn-primary" data-action="tochecklist">Lanjut ke Checklist &#8250;</button>
-  <div class="hint" style="text-align:center;margin-top:8px;">${iconPin.replace('<svg', '<svg width="13" height="13" style="vertical-align:-2px"')} Checklist membutuhkan izin lokasi (GPS) aktif di HP.</div>
   <div style="height:10px"></div>
   <button class="btn-danger" data-action="deleteaudit" style="width:100%;">Hapus Audit Ini</button>`
 }
@@ -365,14 +424,13 @@ function viewForm() {
 function formErrors(a) {
   const i = a.info
   const errs = []
-  const nums = [['operatorTotal', 'Total operator'], ['operatorShift1', 'Operator shift 1'], ['operatorShift2', 'Operator shift 2'], ['operatorShift3', 'Operator shift 3']]
-  nums.forEach(([k, l]) => {
-    const v = parseAngka(i[k])
-    if (v === null || v < 0) errs.push(`${l} belum diisi`)
-  })
-  if (!i.nozzles.length) errs.push('Jumlah nozzle belum diisi')
+  if (!(i.auditors || []).some((x) => String(x || '').trim())) errs.push('Nama auditor belum diisi')
+  if (!operatorTotal(a)) errs.push('Jumlah operator per shift belum diisi')
+  if (!(i.shiftAudit || []).length) errs.push('Shift yang bertugas saat audit belum dipilih')
+  else if (!operatorsOnDuty(a)) errs.push('Jumlah operator pada shift yang bertugas masih 0')
+  if (!i.nozzles.length) errs.push('Jumlah nozzle belum di-submit')
   i.nozzles.forEach((n, idx) => {
-    if (!String(n.nomor || '').trim()) errs.push(`Nomor nozzle baris ${idx + 1} belum diisi`)
+    if (!String(n.nomor || '').trim()) errs.push(`Nomor nozzle baris ${idx + 1} belum dipilih`)
     if (!n.produk) errs.push(`Produk nozzle baris ${idx + 1} belum dipilih`)
   })
   const nomor = i.nozzles.map((n) => String(n.nomor || '').trim()).filter(Boolean)
@@ -387,60 +445,34 @@ function resizeNozzles(count) {
   while (list.length < n) list.push({ id: uid('n'), nomor: String(list.length + 1), produk: '' })
   if (list.length > n) {
     const removed = list.splice(n)
-    const tera = getResult(a, TERA_ITEM).tera
-    if (tera) removed.forEach((r) => { delete tera[r.id] })
+    const res = getResult(a, TERA_ITEM)
+    removed.forEach((r) => {
+      if (res.tera) delete res.tera[r.id]
+      if (res.teraMode) delete res.teraMode[r.id]
+    })
   }
   persist(a.id)
   render()
 }
 
-/* =========================================================
-   GPS gate
-   ========================================================= */
-function gpsHelpHtml(err) {
-  return `
-    <h3>${iconPin.replace('<svg', '<svg width="20" height="20" style="vertical-align:-4px;color:var(--primary)"')} Aktifkan Lokasi (GPS)</h3>
-    <p class="modal-p">${esc(err && err.message ? err.message : 'Aplikasi membutuhkan lokasi GPS.')}</p>
-    <p class="modal-p">Audit hanya bisa dilanjutkan bila GPS aktif, karena setiap foto bukti dicap tanggal, jam dan koordinat lokasi.</p>
-    <ol class="modal-list">
-      <li>Nyalakan <b>Lokasi / GPS</b> di pengaturan cepat HP.</li>
-      <li>Di browser, ketuk ikon gembok/pengaturan situs di address bar &rarr; <b>Izin</b> &rarr; <b>Lokasi</b> &rarr; <b>Izinkan</b>. Lakukan juga untuk <b>Kamera</b>.</li>
-      <li>Ketuk <b>Coba Lagi</b>.</li>
-    </ol>
-    <button class="btn-primary" data-action="gpsretry">Coba Lagi</button>
-    <div style="height:8px"></div>
-    <button class="btn-secondary" data-close>Tutup</button>`
-}
-
-async function enterChecklist() {
+function enterChecklist() {
   const a = curAudit()
   const errs = formErrors(a)
   if (errs.length) {
     showModal(`<h3>Lengkapi Data Dulu</h3><p class="modal-p">Data berikut wajib diisi sebelum checklist:</p><ul class="modal-list">${errs.map((e) => `<li>${esc(e)}</li>`).join('')}</ul><button class="btn-primary" data-close>Oke</button>`)
     return
   }
-  showToast('Memeriksa lokasi GPS…', 4000)
-  try {
-    const pos = await requireGps()
-    if (!a.lokasiAudit) a.lokasiAudit = pos
-    a.lokasiTerakhir = pos
+  const first = !a.pinaltiPromptShown
+  go('checklist', { auditId: a.id })
+  if (first) {
+    a.pinaltiPromptShown = true
     persist(a.id)
-    closeModal()
-    const first = !a.pinaltiPromptShown
-    go('checklist', { auditId: a.id })
-    showToast(`Lokasi aktif · ${formatCoord(pos)}`)
-    if (first) {
-      a.pinaltiPromptShown = true
-      persist(a.id)
-      showModal(`
-        <h3>Cek Item Pinalti Dahulu?</h3>
-        <p class="modal-p">Ada <b>${Object.keys(PINALTI_META).length} item pinalti</b> yang wajib lulus (tidak boleh F). Bila salah satu F, SPBU otomatis tidak lulus Pasti Pas.</p>
-        <button class="btn-primary" data-pinfilter="all" data-close>Ya, Cek Item Pinalti Dahulu</button>
-        <div style="height:8px"></div>
-        <button class="btn-secondary" data-close>Tidak, Langsung Checklist Lengkap</button>`)
-    }
-  } catch (err) {
-    showModal(gpsHelpHtml(err))
+    showModal(`
+      <h3>Cek Item Pinalti Dahulu?</h3>
+      <p class="modal-p">Ada <b>${Object.keys(PINALTI_META).length} item pinalti</b> yang wajib lulus (tidak boleh F). Bila salah satu F, SPBU otomatis tidak lulus Pasti Pas.</p>
+      <button class="btn-primary" data-pinfilter="all" data-close>Ya, Cek Item Pinalti Dahulu</button>
+      <div style="height:8px"></div>
+      <button class="btn-secondary" data-close>Tidak, Langsung Checklist Lengkap</button>`)
   }
 }
 
@@ -448,7 +480,6 @@ async function enterChecklist() {
    VIEW: CHECKLIST
    ========================================================= */
 function statusChip(r) {
-  if (r.submittedAt && r.changedAfterSubmit) return `<span class="st-chip warn">Ada perubahan · submit ulang</span>`
   if (r.submittedAt) return `<span class="st-chip ok">✓ Tersubmit ${fmtTime(r.submittedAt)}</span>`
   if (r.grade) return `<span class="st-chip draft">Draft</span>`
   return ''
@@ -481,9 +512,10 @@ function autoGradeInfo(a, code) {
     const e = evalTenants(a)
     if (e.autoGrade === 'A') return { grade: 'A', why: 'semua tenant punya izin prinsip berlaku' }
     if (e.autoGrade === 'F') return { grade: 'F', why: 'ada tenant tanpa izin prinsip berlaku / foto izin' }
-  } else if (GUIDELINE[code] && GUIDELINE[code].pct && r.pct) {
-    const g = gradeFromPct(GUIDELINE[code].pct, r.pct.ok, r.pct.n)
-    if (g) return { grade: g, why: `${r.pct.ok} dari ${r.pct.n} sesuai (${Math.round((parseAngka(r.pct.ok) / parseAngka(r.pct.n)) * 100)}%) — kriteria guideline` }
+  } else if (GUIDELINE[code] && GUIDELINE[code].pct) {
+    const { ok, n } = pctValues(a, code)
+    const g = gradeFromPct(GUIDELINE[code].pct, ok, n)
+    if (g) return { grade: g, why: `${ok} dari ${n} ${OPERATOR_ITEMS[code] ? 'operator ' : ''}sesuai (${Math.round((parseAngka(ok) / n) * 100)}%) — kriteria guideline` }
   }
   return null
 }
@@ -505,16 +537,15 @@ function densityOutHtml(a, code) {
   const r = getResult(a, code)
   const e = evalDensity(r)
   const rows = [
-    ['D15 pengiriman terakhir', e.refD15 !== null ? `${formatDensity(e.refD15)}${e.refCalc ? ` <small>(${METHOD_LABEL[e.refCalc.method]})</small>` : ' <small>(dokumen)</small>'}` : '—'],
-    ['D15 sampel audit', e.auditD15 !== null ? `${formatDensity(e.auditD15)} <small>(${METHOD_LABEL[e.auditCalc.method]})</small>` : '—'],
+    ['Hasil density pengiriman terakhir', e.refD15 !== null ? `${formatDensity(e.refD15)}${e.refCalc ? ` <small>(${METHOD_LABEL[e.refCalc.method]})</small>` : ' <small>(input langsung)</small>'}` : '—'],
+    ['Hasil density sampel audit', e.auditD15 !== null ? `${formatDensity(e.auditD15)} <small>(${METHOD_LABEL[e.auditCalc.method]})</small>` : '—'],
     ['Selisih', formatSigned(e.selisih)],
   ]
   let status = `<span class="res-pill idle">Isi density &amp; suhu (cth. 0,7450 atau 745)</span>`
   if (e.ok === true) status = `<span class="res-pill ok">✓ Dalam toleransi ±0,003</span>`
   if (e.ok === false) status = `<span class="res-pill bad">✕ Melebihi toleransi ±0,003</span>`
   return `${rows.map(([l, v]) => `<div class="out-row"><span>${l}</span><b>${v}</b></div>`).join('')}
-    <div style="margin-top:6px">${status}</div>
-    ${e.terlaluCepat ? `<div class="res-pill warn" style="margin-top:6px">Sampel diambil &lt; 2 jam setelah bongkar (${e.jamSetelahBongkar.toFixed(1)} jam)</div>` : ''}`
+    <div style="margin-top:6px">${status}</div>`
 }
 
 function densityBlock(a, it) {
@@ -531,10 +562,7 @@ function densityBlock(a, it) {
       ${densityField(it.code, 'refObs', 'Density obs', d, { placeholder: '0,7450' })}
       ${densityField(it.code, 'refSuhu', 'Suhu °C', d, { placeholder: '30,5' })}
     </div>
-    <div class="field-row">
-      ${densityField(it.code, 'refD15Manual', 'atau D15 dokumen', d, { placeholder: 'opsional' })}
-      ${densityField(it.code, 'waktuBongkar', 'Waktu bongkar', d, { type: 'datetime-local' })}
-    </div>
+    ${densityField(it.code, 'refD15Manual', 'Hasil Density', d, { placeholder: 'opsional · bila density @15°C sudah diketahui' })}
     <div class="calc-sec">2 · Sampel saat audit</div>
     <div class="field-row">
       ${densityField(it.code, 'obs', 'Density obs', d, { placeholder: '0,7440' })}
@@ -563,13 +591,16 @@ function teraBlock(a) {
   const tera = getResult(a, TERA_ITEM).tera || {}
   return `<div class="calc">
     <div class="calc-head">Tera Bejana Ukur 20 L per Nozzle <span class="mini-pill">batas ${TERA_LIMIT_ML} ml</span></div>
-    <div class="hint">Isi selisih volume (ml) nozzle yang diperiksa: negatif = kurang, positif = lebih. Kurang dari ${TERA_LIMIT_ML} ml = di bawah toleransi (Red). Kosongkan nozzle yang tidak diperiksa. Nilai A/B/C/F mengikuti tabel ketentuan guideline (jumlah nozzle dicek vs jumlah Red).</div>
+    <div class="hint">Pilih mode <b>P</b> (Preset) atau <b>M</b> (Manual) lalu isi selisih volume (ml) nozzle yang diperiksa: negatif = kurang, positif = lebih. Kurang dari ${TERA_LIMIT_ML} ml = di bawah toleransi (Red). Kosongkan nozzle yang tidak diperiksa. Nilai A/B/C/F mengikuti tabel ketentuan guideline (jumlah nozzle dicek vs jumlah Red).</div>
     ${!e.rows.length ? `<div class="res-pill warn" style="margin:8px 0">Data nozzle belum diisi.</div><button class="btn-ghost" data-back="form">Isi Data Nozzle</button>` : `
     <table class="tera-table">
-      <tr><th>Nozzle</th><th>Produk</th><th>Selisih (ml)</th><th></th></tr>
+      <tr><th>Nozzle</th><th>Produk</th><th>Mode</th><th>Selisih (ml)</th><th></th></tr>
       ${e.rows.map((row) => `<tr>
         <td class="mono">${esc(row.nomor)}</td>
         <td>${esc(row.produk)}</td>
+        <td><div class="pm-toggle" role="group" aria-label="Mode tera nozzle ${esc(row.nomor)}">
+          <button class="pm ${row.mode === 'P' ? 'on' : ''}" data-teramode="${row.id}|P" title="Preset">P</button><button class="pm ${row.mode === 'M' ? 'on' : ''}" data-teramode="${row.id}|M" title="Manual">M</button>
+        </div></td>
         <td><input data-tera="${row.id}" inputmode="numeric" value="${esc(tera[row.id])}" placeholder="—"></td>
         <td data-terastatus="${row.id}">${teraStatusHtml(row)}</td>
       </tr>`).join('')}
@@ -597,10 +628,11 @@ function tenantOutHtml(a) {
     <div class="out-row"><span>Tenant nasional berizin berlaku</span><b>${e.hasNas ? '<span style="color:var(--status-good)">✓ ada</span>' : '<span style="color:var(--status-warning)">belum ada</span>'}</b></div>`
 }
 
-function thumbsHtml(photos, rmAttr) {
+/** Thumbnail foto. `viewKey` dipakai untuk membuka pratinjau penuh; tombol hapus disembunyikan bila terkunci. */
+function thumbsHtml(photos, rmAttr, viewKey, locked = false) {
   if (!photos || !photos.length) return ''
   return `<div class="photo-strip">${photos.map((p, idx) => `
-    <div class="photo-thumb"><img src="${thumbSrc(p)}" alt="" loading="lazy"><button class="rm" ${rmAttr}="${idx}">&times;</button></div>`).join('')}</div>`
+    <div class="photo-thumb"><img src="${thumbSrc(p)}" alt="Foto ${idx + 1}" loading="lazy" data-viewphoto="${viewKey}|${idx}">${locked ? '' : `<button class="rm" ${rmAttr}="${idx}" aria-label="Hapus foto">&times;</button>`}</div>`).join('')}</div>`
 }
 
 function tenantBlock(a) {
@@ -627,11 +659,11 @@ function tenantBlock(a) {
         <div class="tenant-photos">
           <div>
             <button class="photo-btn" data-tphoto="${t.id}|fotoTenant">${iconCamera} Foto Tenant (${(t.fotoTenant || []).length})</button>
-            ${thumbsHtml(t.fotoTenant, `data-rmtphoto="${t.id}|fotoTenant" data-idx`)}
+            ${thumbsHtml(t.fotoTenant, `data-rmtphoto="${t.id}|fotoTenant" data-idx`, `tenant|${t.id}|fotoTenant`, tenantLocked(a))}
           </div>
           <div>
             <button class="photo-btn" data-tphoto="${t.id}|fotoIzin">${iconCamera} Foto Izin Prinsip (${(t.fotoIzin || []).length})</button>
-            ${thumbsHtml(t.fotoIzin, `data-rmtphoto="${t.id}|fotoIzin" data-idx`)}
+            ${thumbsHtml(t.fotoIzin, `data-rmtphoto="${t.id}|fotoIzin" data-idx`, `tenant|${t.id}|fotoIzin`, tenantLocked(a))}
           </div>
         </div>
       </div>`).join('')}
@@ -649,17 +681,33 @@ function specialBlock(a, it) {
 
 const PCT_LABEL = { 'A-F': 'A 100% · B ≥80% · C ≥60% · D ≥40% · E ≥20% · F <20%', ACF: 'A 100% · C ≥60% · F <60%', AF: 'A 100% · F <100%', ABCF: 'A 100% · B ≥80% · C ≥60% · F <60%' }
 
+/** Nilai "sesuai" & total sampel. Item operator: total otomatis dari data operator. */
+function pctValues(a, code) {
+  const r = getResult(a, code)
+  const p = r.pct || {}
+  const auto = operatorSampleTotal(a, code)
+  const n = auto !== null ? auto : parseAngka(p.n)
+  return { ok: p.ok, n, auto: auto !== null }
+}
+
 /** Kalkulator "% sesuai" untuk item yang kriteria guideline-nya berbasis persentase. */
-function pctBlock(it, r) {
+function pctBlock(a, it, r) {
   const g = GUIDELINE[it.code]
   if (!g || !g.pct) return ''
   const p = r.pct || {}
+  const { ok, n, auto } = pctValues(a, it.code)
+  const okNum = parseAngka(ok)
+  const kind = OPERATOR_ITEMS[it.code]
+  const showNames = kind && okNum !== null && n && okNum < n
   return `<div class="pct-row">
-    <span class="pct-label">Hitung dari sampel</span>
+    <span class="pct-label">${kind ? 'Operator sesuai' : 'Hitung dari sampel'}</span>
     <input data-pct="${it.code}" data-pf="ok" inputmode="numeric" value="${esc(p.ok)}" placeholder="sesuai">
     <span>dari</span>
-    <input data-pct="${it.code}" data-pf="n" inputmode="numeric" value="${esc(p.n)}" placeholder="total">
+    ${auto
+      ? `<span class="pct-auto" title="Otomatis dari Data Operator">${n}</span><span class="pct-src">${kind === 'all' ? 'total operator' : 'operator bertugas'}</span>`
+      : `<input data-pct="${it.code}" data-pf="n" inputmode="numeric" value="${esc(p.n)}" placeholder="total">`}
     <div class="pct-rule">${PCT_LABEL[g.pct]}</div>
+    ${showNames ? `<div class="field pct-names"><label>Nama operator yang tidak memenuhi (${n - okNum} orang)</label><input data-pct="${it.code}" data-pf="names" value="${esc(p.names)}" placeholder="cth. Budi, Sari"></div>` : ''}
   </div>`
 }
 
@@ -678,31 +726,35 @@ function itemCardHtml(a, it, opts = {}) {
   const r = getResult(a, it.code)
   const meta = PINALTI_META[it.code]
   const tiered = meta && meta.tiered
-  const submitted = r.submittedAt && !r.changedAfterSubmit
+  const locked = !!r.submittedAt
   return `
-  <div class="item-card ${it.pinalti ? 'pinalti' : ''} ${submitted ? 'submitted' : ''}" id="item-${it.code.replace(/\./g, '_')}" data-item="${it.code}">
+  <div class="item-card ${it.pinalti ? 'pinalti' : ''} ${locked ? 'submitted' : ''}" id="item-${it.code.replace(/\./g, '_')}" data-item="${it.code}" data-crumb="${opts.breadcrumb ? 1 : 0}">
     ${opts.breadcrumb ? `<div class="crumb">${esc(breadcrumb(it))}</div>` : ''}
     <div class="item-head">
       <div class="code">${it.code}${it.pinalti ? '<span class="badge-pinalti">PINALTI</span>' : ''}</div>
       <span data-status="${it.code}">${statusChip(r)}</span>
     </div>
     <div class="desc">${esc(it.desc)}</div>
-    ${specialBlock(a, it)}
-    ${pctBlock(it, r)}
-    <div class="grade-row" data-graderow="${it.code}">${gradeRowHtml(it, r)}</div>
-    <div data-autohint="${it.code}">${autoHintHtml(a, it.code)}</div>
-    <div data-crit="${it.code}">${criteriaHtml(it, r)}</div>
-    ${tiered ? `<div class="jumlah-row">
-      <label>Jumlah ${meta.unit} tersedia</label>
-      <input type="number" min="0" max="9" inputmode="numeric" value="${r.jumlah || ''}" data-jumlah="${it.code}">
-    </div>` : ''}
-    <div class="item-toolrow">
-      <button class="photo-btn" data-photo="${it.code}">${iconCamera} Foto (${(r.photos || []).length})</button>
-      <button class="note-toggle" data-notetoggle="${it.code}">${noteOpenSet.has(it.code) || r.note ? 'Sembunyikan catatan' : '+ Catatan'}</button>
-      <button class="submit-btn" data-submit="${it.code}">Submit</button>
+    <div class="item-body"${locked ? ' inert' : ''}>
+      ${specialBlock(a, it)}
+      ${pctBlock(a, it, r)}
+      <div class="grade-row" data-graderow="${it.code}">${gradeRowHtml(it, r)}</div>
+      <div data-autohint="${it.code}">${autoHintHtml(a, it.code)}</div>
+      ${tiered ? `<div class="jumlah-row">
+        <label>Jumlah ${meta.unit} tersedia</label>
+        <input type="number" min="0" max="9" inputmode="numeric" value="${r.jumlah || ''}" data-jumlah="${it.code}">
+      </div>` : ''}
+      ${(noteOpenSet.has(it.code) || r.note) ? `<div class="item-note field"><textarea placeholder="Catatan temuan auditor..." data-note="${it.code}">${esc(r.note)}</textarea></div>` : ''}
     </div>
-    ${(noteOpenSet.has(it.code) || r.note) ? `<div class="item-note field"><textarea placeholder="Catatan temuan auditor..." data-note="${it.code}">${esc(r.note)}</textarea></div>` : ''}
-    ${thumbsHtml(r.photos, `data-rmphoto="${it.code}" data-idx`)}
+    <div data-crit="${it.code}">${criteriaHtml(it, r)}</div>
+    <div class="item-toolrow">
+      <button class="photo-btn" data-photo="${it.code}" ${locked ? 'disabled' : ''}>${iconCamera} Foto (${(r.photos || []).length})</button>
+      <button class="note-toggle" data-notetoggle="${it.code}" ${locked ? 'disabled' : ''}>${noteOpenSet.has(it.code) || r.note ? 'Sembunyikan catatan' : '+ Catatan'}</button>
+      ${locked
+        ? `<button class="submit-btn edit" data-edit="${it.code}">✎ Edit</button>`
+        : `<button class="submit-btn" data-submit="${it.code}">Submit</button>`}
+    </div>
+    ${thumbsHtml(r.photos, `data-rmphoto="${it.code}" data-idx`, `item|${it.code}`, locked)}
   </div>`
 }
 
@@ -720,9 +772,21 @@ function patchItem(code) {
       li.classList.toggle('on', (k === 'N/A' ? 'X' : k) === r.grade)
     })
   })
-  document.querySelectorAll(attrSel('data-item', code)).forEach((el) => {
-    el.classList.toggle('submitted', !!(r.submittedAt && !r.changedAfterSubmit))
-  })
+  if (GUIDELINE[code] && GUIDELINE[code].pct && OPERATOR_ITEMS[code]) {
+    // Tampilkan/sembunyikan isian nama operator tanpa kehilangan fokus input
+    const { ok, n } = pctValues(a, code)
+    const okNum = parseAngka(ok)
+    const need = okNum !== null && n && okNum < n
+    document.querySelectorAll(attrSel('data-item', code)).forEach((card) => {
+      const row = card.querySelector('.pct-row')
+      if (!row) return
+      const box = row.querySelector('.pct-names')
+      if (need && !box) {
+        row.insertAdjacentHTML('beforeend', `<div class="field pct-names"><label>Nama operator yang tidak memenuhi (${n - okNum} orang)</label><input data-pct="${code}" data-pf="names" value="${esc((r.pct || {}).names)}" placeholder="cth. Budi, Sari"></div>`)
+      } else if (!need && box) box.remove()
+      else if (need && box) box.querySelector('label').textContent = `Nama operator yang tidak memenuhi (${n - okNum} orang)`
+    })
+  }
   document.querySelectorAll(attrSel('data-calcout', code)).forEach((el) => {
     if (DENSITY_ITEMS[code]) el.innerHTML = densityOutHtml(a, code)
     else if (code === TERA_ITEM) el.innerHTML = teraOutHtml(a)
@@ -736,11 +800,31 @@ function patchItem(code) {
   patchProgress()
 }
 
+/** Render ulang seluruh kartu item (mis. setelah Submit/Edit). */
+function rerenderCard(code) {
+  const a = curAudit()
+  const it = ITEM_BY_CODE[code]
+  document.querySelectorAll(attrSel('data-item', code)).forEach((el) => {
+    el.outerHTML = itemCardHtml(a, it, { breadcrumb: el.dataset.crumb === '1' })
+  })
+  patchProgress()
+}
+
+function isLocked(code) {
+  return !!getResult(curAudit(), code).submittedAt
+}
+
+function tenantLocked(a) {
+  return !!getResult(a, TENANT_ITEM).submittedAt
+}
+
 function patchProgress() {
   const el = document.getElementById('progressBox')
   if (el) el.innerHTML = progressHtml()
   const pd = document.getElementById('pinDash')
   if (pd) pd.innerHTML = pinaltiDashHtml()
+  const fab = document.getElementById('reportFab')
+  if (fab) fab.innerHTML = reportFabHtml()
 }
 
 /** Terapkan nilai otomatis (density / tera / tenant) bila hasil perhitungan tersedia. */
@@ -874,7 +958,8 @@ function viewChecklist() {
     ${searchQuery ? `<button class="search-clear" data-action="clearsearch" aria-label="Hapus pencarian">&times;</button>` : ''}
   </div>
   <div id="checkBody">${checkBodyHtml()}</div>
-  <div class="sticky-progress" id="progressBox">${progressHtml()}</div>`
+  <div class="sticky-progress" id="progressBox">${progressHtml()}</div>
+  <div id="reportFab">${reportFabHtml()}</div>`
 }
 
 function refreshCheckBody() {
@@ -897,7 +982,7 @@ function validateItem(a, code) {
   if (r.grade && r.grade !== 'X') {
     if (DENSITY_ITEMS[code]) {
       const e = evalDensity(r)
-      if (e.refD15 === null) errs.push('Isi density & suhu sampel pengiriman terakhir (atau D15 dokumen).')
+      if (e.refD15 === null) errs.push('Isi density & suhu sampel pengiriman terakhir (atau Hasil Density).')
       if (e.auditD15 === null) errs.push('Isi density & suhu sampel saat audit.')
     }
     if (code === TERA_ITEM) {
@@ -905,6 +990,13 @@ function validateItem(a, code) {
       if (!e.rows.length) errs.push('Data nozzle belum diisi di form Data SPBU.')
       else if (!e.testedCount) errs.push('Isi hasil tera minimal satu nozzle.')
       else if (!e.coverageOk && e.autoGrade !== 'F') errs.push(`Jumlah nozzle yang diperiksa belum memenuhi target ${e.level === 'excellent' ? '100%' : '50%'} per produk.`)
+    }
+    if (OPERATOR_ITEMS[code] && GUIDELINE[code] && GUIDELINE[code].pct) {
+      const { ok, n } = pctValues(a, code)
+      const okNum = parseAngka(ok)
+      if (okNum !== null && n && okNum < n && !String((r.pct || {}).names || '').trim()) {
+        errs.push(`Isi nama ${n - okNum} operator yang tidak memenuhi kriteria.`)
+      }
     }
     if (code === TENANT_ITEM) {
       const e = evalTenants(a)
@@ -922,191 +1014,240 @@ async function submitItem(code) {
     showModal(`<h3>Item ${esc(code)} belum bisa disubmit</h3><ul class="modal-list">${errs.map((e) => `<li>${esc(e)}</li>`).join('')}</ul><button class="btn-primary" data-close>Oke</button>`)
     return
   }
-  setResult(code, { submittedAt: Date.now(), changedAfterSubmit: false })
+  setResult(code, { submittedAt: Date.now() })
   try {
     await flushSave(a)
     showToast(`✓ Item ${code} tersimpan`)
   } catch (e) {
     showToast('Gagal menyimpan: ' + e.message)
   }
-  patchItem(code)
+  rerenderCard(code)
+}
+
+/** Buka kembali item yang sudah disubmit agar bisa diubah. */
+function editItem(code) {
+  const a = curAudit()
+  if (a.status === 'selesai') {
+    if (!confirm('Laporan audit ini sudah disubmit. Mengedit item akan membuka kembali laporan (status kembali Draft). Lanjutkan?')) return
+    a.status = 'draft'
+  }
+  setResult(code, { submittedAt: null })
+  rerenderCard(code)
+  showToast(`Item ${code} dapat diubah — tekan Submit lagi setelah selesai`, 2600)
+}
+
+/* ----- Submit laporan ----- */
+function reportFabHtml() {
+  const a = curAudit()
+  if (!a) return ''
+  const comp = computeAudit(a)
+  if (comp.totalSubmitted < comp.totalItems) return ''
+  if (a.status === 'selesai') {
+    return `<button class="report-fab done" data-action="goreport"><span class="fab-ico">✓</span> Laporan tersubmit · Lihat</button>`
+  }
+  return `<button class="report-fab" data-action="submitreport"><span class="fab-ico">➤</span> Submit Laporan</button>`
+}
+
+function reportNumber(a) {
+  const code = (a.id.replace(/[^a-z0-9]/gi, '').slice(-4) || '0000').toUpperCase()
+  return `PW/${a.info.nomorSpbu || 'SPBU'}/${code}`
+}
+
+async function submitReport() {
+  const a = curAudit()
+  const comp = computeAudit(a)
+  if (comp.totalSubmitted < comp.totalItems) { showToast('Masih ada item yang belum disubmit'); return }
+  const steps = ['Memeriksa 125 item checklist', 'Menghitung Total Score & klasifikasi', 'Memvalidasi item pinalti', cloud.role ? 'Menyimpan ke cloud' : 'Menyimpan di perangkat']
+  const root = document.getElementById('modalRoot')
+  root.innerHTML = `<div class="submit-overlay" role="alertdialog" aria-live="polite" aria-label="Mengirim laporan">
+    <div class="submit-card">
+      <div class="submit-ring"><svg viewBox="0 0 100 100"><circle class="track" cx="50" cy="50" r="44"/><circle class="bar" cx="50" cy="50" r="44"/></svg><div class="submit-check">✓</div></div>
+      <div class="submit-title">Mengirim Laporan…</div>
+      <ul class="submit-steps">${steps.map((t, k) => `<li data-step="${k}"><span class="dot"></span>${esc(t)}</li>`).join('')}</ul>
+    </div>
+  </div>`
+  const overlay = root.querySelector('.submit-overlay')
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+  const mark = (k, st) => { const li = overlay.querySelector(`[data-step="${k}"]`); if (li) li.className = st }
+  try {
+    mark(0, 'run'); await wait(550); mark(0, 'ok')
+    mark(1, 'run'); await wait(550); mark(1, 'ok')
+    mark(2, 'run'); await wait(450); mark(2, comp.failedPinalti.length ? 'warn' : 'ok')
+    mark(3, 'run')
+    a.status = 'selesai'
+    a.reportSubmittedAt = Date.now()
+    a.reportNo = a.reportNo || reportNumber(a)
+    persist(a.id)
+    await flushSave(a)
+    if (cloud.role && navigator.onLine) await syncNow().catch(() => {})
+    await wait(400)
+    mark(3, 'ok')
+    overlay.classList.add('done')
+    overlay.querySelector('.submit-title').textContent = 'Laporan Tersubmit'
+    await wait(1100)
+    closeModal()
+    go('report', { auditId: a.id })
+  } catch (e) {
+    closeModal()
+    showToast('Gagal submit laporan: ' + e.message, 4000)
+  }
 }
 
 /* ----- Photo ----- */
+function cameraHelpHtml(err) {
+  return `
+    <h3>${iconCamera.replace('<svg', '<svg width="20" height="20" style="vertical-align:-4px;color:var(--primary)"')} Kamera tidak dapat dibuka</h3>
+    <p class="modal-p">${esc(err && err.message ? err.message : 'Kamera tidak tersedia.')}</p>
+    <ol class="modal-list">
+      <li>Di browser, ketuk ikon gembok/pengaturan situs di address bar &rarr; <b>Izin</b> &rarr; <b>Kamera</b> &rarr; <b>Izinkan</b>.</li>
+      <li>Tutup aplikasi lain yang sedang memakai kamera, lalu coba lagi.</li>
+    </ol>
+    <button class="btn-secondary" data-close>Tutup</button>`
+}
+
 async function takePhoto(label) {
   const a = curAudit()
   try {
-    const shot = await captureStampedPhoto({ label, spbu: a.info.nomorSpbu })
+    const auditor = currentUserName() || (a.info.auditors || []).find((x) => x) || ''
+    const shot = await captureStampedPhoto({ label, spbu: a.info.nomorSpbu, auditor })
     if (!shot) return null
-    a.lokasiTerakhir = { lat: shot.lat, lng: shot.lng, acc: shot.acc, ts: shot.ts }
     return await storeNewPhoto(shot)
   } catch (err) {
-    showModal(gpsHelpHtml(err))
+    showModal(cameraHelpHtml(err))
     return null
   }
 }
 
+/** Pratinjau foto penuh + status keabsahan. key = "item|<code>|<idx>" atau "tenant|<id>|<field>|<idx>". */
+async function openPhotoViewer(key) {
+  const a = curAudit()
+  const parts = key.split('|')
+  let photo = null
+  let caption = ''
+  if (parts[0] === 'item') {
+    photo = (getResult(a, parts[1]).photos || [])[+parts[2]]
+    caption = `Item ${parts[1]}`
+  } else if (parts[0] === 'tenant') {
+    const tenant = (getResult(a, TENANT_ITEM).tenants || []).find((x) => x.id === parts[1])
+    photo = tenant && (tenant[parts[2]] || [])[+parts[3]]
+    caption = `${TENANT_ITEM} · ${tenant ? tenant.nama || 'Tenant' : ''} · ${parts[2] === 'fotoIzin' ? 'Izin Prinsip' : 'Tenant'}`
+  } else if (parts[0] === 'id') {
+    const hit = buildReport(a).photos.find((x) => x.photo && x.photo.id === parts[1])
+    if (hit) { photo = hit.photo; caption = hit.caption }
+  }
+  if (!photo) return
+  const root = document.getElementById('modalRoot')
+  root.innerHTML = `<div class="viewer" data-viewer data-modal-overlay>
+    <button class="viewer-x" data-close aria-label="Tutup">&times;</button>
+    <img class="viewer-img" src="${thumbSrc(photo)}" alt="${esc(caption)}">
+    <div class="viewer-meta">
+      <b>${esc(caption)}</b>
+      <span>${photo.ts ? esc(formatStampTime(photo.ts)) : ''}${photo.auditor ? ' · ' + esc(photo.auditor) : ''}</span>
+      <span>Kode verifikasi: <b class="mono">${esc(photo.code || '—')}</b> <span class="verify-state" data-verify>memeriksa…</span></span>
+    </div>
+  </div>`
+  const img = root.querySelector('.viewer-img')
+  fullUrl(photo).then((u) => { if (u) img.src = u })
+  const blob = await photoBlob(photo).catch(() => null)
+  const state = await verifyPhoto(photo, blob)
+  const el = root.querySelector('[data-verify]')
+  if (el) {
+    el.className = 'verify-state ' + state
+    el.textContent = state === 'valid' ? '✓ Asli, belum diubah' : state === 'changed' ? '✕ File berubah' : 'Foto lama (tanpa sidik digital)'
+  }
+}
+
 /* =========================================================
-   VIEW: REPORT
+   VIEW: REPORT (pratinjau isi PDF — src/lib/report.js)
    ========================================================= */
-function buildKomentarByElement(a, elCode) {
-  const lines = []
-  ALL_ITEMS.filter((i) => i.elCode === elCode).forEach((it) => {
-    const r = getResult(a, it.code)
-    if (r.grade && r.grade !== 'A' && r.grade !== 'X') {
-      let line = `${it.code} : ${esc(it.desc)} — nilai <b>${r.grade}</b>`
-      if (r.note) line += ` &mdash; ${esc(r.note)}`
-      lines.push(line)
-    } else if (r.note) {
-      lines.push(`${it.code} : ${esc(r.note)}`)
-    }
-  })
-  return lines
+const LEVEL_COLOR = { Excellent: '#0066FF', Good: '#10B981', Average: '#00C2B8', Poor: '#F59E0B', Warning: '#EF4444' }
+
+function reportTable(head, rows) {
+  return `<div class="table-scroll"><table class="report-table"><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr>${rows.join('')}</table></div>`
 }
 
 function viewReport() {
   const a = curAudit()
-  const i = a.info
+  const R = buildReport(a)
   const comp = computeAudit(a)
   const badge = classificationBadge(comp.classification)
-  const level = i.kelasTarget || 'good'
-  const reasons = comp.classification === 'gagal' ? reasonsForFail(comp, level) : []
+  const infoRows = (rows) => rows.map((r) => `<div class="kv"><span>${esc(r[0])}</span><b>${esc(r[1])}</b></div>${r[2] ? `<div class="kv"><span>${esc(r[2])}</span><b>${esc(r[3])}</b></div>` : ''}`).join('')
 
-  const indikatorRows = CHECKLIST_TREE.map((el) => {
-    const er = comp.elementResults[el.code]
-    const band = er.applicable > 0 ? complianceBand(er.pct) : { label: '-', color: '#727687' }
-    return `<tr><td>${esc(el.title)}</td><td>${el.weight}</td><td>${(ELEMENT_MIN[level][el.code] * 100).toFixed(0)}%</td>
-      <td><span class="chip" style="background:${band.color}">${er.applicable > 0 ? (er.pct * 100).toFixed(2) + '%' : '-'} ${band.label}</span></td></tr>`
-  }).join('')
+  const indikator = reportTable(['Indikator', 'Bobot', 'Min', 'Compliance', 'Skor'], [
+    ...R.indikator.map((x) => `<tr><td>${esc(x.title)}</td><td>${x.weight}</td><td>${Math.round(x.min * 100)}%</td>
+      <td><span class="chip" style="background:${LEVEL_COLOR[x.level]}">${fmtPct(x.pct)}</span></td><td>${fmtSkor(x.skor)}</td></tr>`),
+    `<tr class="total-row"><td colspan="4">TOTAL SCORE</td><td>${R.totalScore.toFixed(2)}</td></tr>`,
+  ])
 
-  const subRows = CHECKLIST_TREE.map((el) => {
-    const subs = el.subs.map((sub) => {
-      const sr = comp.subResults[sub.code]
-      const band = sr.applicable > 0 ? complianceBand(sr.pct) : { label: '-', color: '#727687' }
-      return `<tr><td>${sub.code} ${esc(sub.title)}</td><td>${sub.weight}</td><td><span class="chip" style="background:${band.color}">${sr.applicable > 0 ? (sr.pct * 100).toFixed(2) + '%' : '-'}</span></td></tr>`
-    }).join('')
-    return `<div class="section-title">${el.code}. ${esc(el.title)}</div>
-    <div class="card"><table class="report-table"><tr><th>Sub Elemen</th><th>Bobot</th><th>Compliance</th></tr>${subs}</table></div>`
-  }).join('')
-
-  const komentarHtml = CHECKLIST_TREE.map((el) => {
-    const lines = buildKomentarByElement(a, el.code)
-    if (!lines.length) return ''
-    return `<div style="margin-bottom:10px;"><b style="font-size:13px;">${esc(el.title)}</b><ul class="komentar-list">${lines.map((l) => `<li>${l}</li>`).join('')}</ul></div>`
-  }).join('') || '<p style="color:var(--muted);font-size:13px;">Tidak ada temuan minor. Semua item bernilai A.</p>'
+  const subs = reportTable(['Elemen / Sub Elemen', 'Bobot', 'Compliance', 'Level'], R.subRows.map((row) => row.type === 'el'
+    ? `<tr class="el-row"><td colspan="4">${esc(row.title)}</td></tr>`
+    : `<tr><td style="padding-left:16px">${esc(row.title)}</td><td>${row.weight}</td><td>${fmtPct(row.pct)}</td>
+        <td>${row.level === '-' ? '-' : `<span class="chip" style="background:${LEVEL_COLOR[row.level]}">${row.level}</span>`}</td></tr>`))
 
   const pinaltiHtml = comp.failedPinalti.length ? `
     <div class="card" style="border:1.5px solid var(--red);">
       <b style="color:var(--red);">&#9888; Item Pinalti Gagal (${comp.failedPinalti.length})</b>
       <ul class="komentar-list">${comp.failedPinalti.map((c) => `<li>${c} — ${esc(PINALTI_META[c].label)}</li>`).join('')}</ul>
-      <p style="font-size:12px;color:var(--muted);margin:6px 0 0;">Item pinalti bernilai F menyebabkan SPBU otomatis tidak dapat disertifikasi Pasti Pas, terlepas dari Total Score.</p>
     </div>` : ''
 
-  // Density
-  const densRows = Object.entries(DENSITY_ITEMS).map(([code, produk]) => {
-    const r = getResult(a, code)
-    const e = evalDensity(r)
-    if (r.grade === 'X' || (e.refD15 === null && e.auditD15 === null)) return ''
-    return `<tr><td>${esc(produk)}</td><td>${formatDensity(e.refD15)}</td><td>${formatDensity(e.auditD15)}</td><td>${formatSigned(e.selisih)}</td>
-      <td>${e.ok === null ? '-' : `<span class="chip" style="background:${e.ok ? '#10B981' : '#EF4444'}">${e.ok ? 'OK' : 'Di luar'}</span>`}</td></tr>`
-  }).join('')
-  const densHtml = densRows ? `<div class="section-title">Pengecekan Density @15°C (toleransi ±0,003)</div>
-    <div class="card"><table class="report-table"><tr><th>Produk</th><th>D15 Kirim</th><th>D15 Audit</th><th>Selisih</th><th></th></tr>${densRows}</table></div>` : ''
+  const komentar = R.komentar.map((g) => `<div class="kom-group"><b>${esc(g.element)}</b>
+    <ul class="komentar-list">${g.rows.map((r) => `<li><span class="mono">${esc(r[0])}</span> ${esc(r[1])}</li>`).join('')}</ul></div>`).join('')
 
-  // Tera
-  const tera = evalTera(a)
-  const teraHtml = tera.rows.length ? `<div class="section-title">Tera Bejana Ukur 20 L (batas ${TERA_LIMIT_ML} ml)</div>
-    <div class="card"><table class="report-table"><tr><th>Nozzle</th><th>Produk</th><th>Selisih</th><th></th></tr>
-    ${tera.rows.map((r) => `<tr><td>${esc(r.nomor)}</td><td>${esc(r.produk)}</td><td>${r.ml === null ? 'tidak diperiksa' : formatNumber(r.ml) + ' ml'}</td>
-      <td>${r.ok === null ? '-' : `<span class="chip" style="background:${r.ok ? '#10B981' : '#EF4444'}">${r.ok ? 'OK' : 'Gagal'}</span>`}</td></tr>`).join('')}
-    </table>
-    <div class="hint" style="margin-top:8px;">${tera.byProduct.map((p) => `${esc(p.produk)}: ${p.tested}/${p.total} diperiksa (min ${p.required})`).join(' &middot; ')}</div></div>` : ''
+  const qq = R.qq.length ? reportTable(['Nozzle', 'Produk', 'Mode', 'Tera (ml)', 'Qty Var', 'Obs', 'Temp', 'D15', 'Ref D15', 'Var'],
+    R.qq.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`)) : '<p class="hint">Belum ada data nozzle.</p>'
 
-  // Tenant
-  const ten = comp.tenants
-  const catLabel = (id) => (TENANT_CATEGORIES.find((c) => c.id === id) || {}).label || '-'
-  const tenantHtml = `<div class="section-title">Tenant NFR &amp; Izin Prinsip</div>
-    <div class="card">
-      ${ten.rows.length ? `<table class="report-table"><tr><th>Tenant</th><th>Kategori</th><th>Berlaku s/d</th><th></th></tr>
-      ${ten.rows.map((t) => `<tr><td>${esc(t.nama || '-')}</td><td>${esc(catLabel(t.kategori))}</td><td>${esc(t.berlakuSampai || '-')}</td>
-        <td><span class="chip" style="background:${t.valid ? '#10B981' : '#EF4444'}">${t.valid ? 'Berlaku' : 'Tidak berlaku'}</span></td></tr>`).join('')}
-      </table>` : '<p class="hint">Belum ada data tenant.</p>'}
-      <div class="link-row"><span class="l">Syarat Excellent (1 int'l + 1 nasional)</span><span class="v" style="color:${ten.excellentOk ? 'var(--status-good)' : 'var(--status-warning)'}">${ten.excellentOk ? 'Terpenuhi' : 'Belum terpenuhi'}</span></div>
-    </div>`
-
-  const photoItems = []
-  ALL_ITEMS.forEach((it) => {
-    const r = getResult(a, it.code)
-    ;(r.photos || []).forEach((p) => photoItems.push({ p, cap: it.code }))
-  })
-  ;(getResult(a, TENANT_ITEM).tenants || []).forEach((t) => {
-    ;(t.fotoTenant || []).forEach((p) => photoItems.push({ p, cap: `${TENANT_ITEM} ${t.nama || ''} (tenant)` }))
-    ;(t.fotoIzin || []).forEach((p) => photoItems.push({ p, cap: `${TENANT_ITEM} ${t.nama || ''} (izin)` }))
-  })
-  const photoHtml = photoItems.length ? `
-    <div class="section-title">Dokumentasi Foto (GPS &amp; timestamp)</div>
+  const photoHtml = R.photos.length ? `
+    <div class="section-title">Dokumentasi Foto (${R.photos.length})</div>
     <div class="card"><div class="report-photo-grid">
-      ${photoItems.map(({ p, cap }) => `<div><img src="${thumbSrc(p)}" data-full="${esc(p.id || '')}"><div class="cap">${esc(cap)}${p && p.ts ? `<br>${esc(formatStampTime(p.ts))}` : ''}</div></div>`).join('')}
+      ${R.photos.map(({ photo: p, caption }) => `<div data-viewphoto="id|${esc(p.id || '')}"><img src="${thumbSrc(p)}" data-full="${esc(p.id || '')}" alt=""><div class="cap">${esc(caption)}${p && p.ts ? `<br>${esc(formatStampTime(p.ts))}` : ''}${p && p.code ? `<br>Kode ${esc(p.code)}` : ''}</div></div>`).join('')}
     </div></div>` : ''
-
-  const umkBlock = (i.umkTahunIni || i.upahOperator) ? `
-    <div class="link-row"><span class="l">UMK Tahun Ini / Lalu</span><span class="v">Rp ${esc(i.umkTahunIni)} / Rp ${esc(i.umkTahunLalu)}</span></div>
-    <div class="link-row"><span class="l">Upah Operator</span><span class="v">Rp ${esc(i.upahOperator)}</span></div>
-    <div class="link-row"><span class="l">Hari Kerja/bulan</span><span class="v">${esc(i.hariKerja)}</span></div>
-    <div class="link-row"><span class="l">BPJS</span><span class="v">${esc(i.bpjs)}</span></div>` : ''
-
-  const productCount = PRODUCTS.map((p) => [p, i.nozzles.filter((n) => n.produk === p).length]).filter(([, c]) => c)
 
   return `
   <div id="reportContent">
-  <div class="card">
-    <div class="link-row"><span class="l">Nomor SPBU</span><span class="v">${esc(i.nomorSpbu) || '-'}</span></div>
-    <div class="link-row"><span class="l">Kota / Region</span><span class="v">${esc(i.kota)} / ${esc(i.region)}</span></div>
-    <div class="link-row"><span class="l">Alamat</span><span class="v">${esc(i.alamat) || '-'}</span></div>
-    <div class="link-row"><span class="l">Tipe Kepemilikan</span><span class="v">${esc(i.tipeKepemilikan)}</span></div>
-    <div class="link-row"><span class="l">Area Business Head</span><span class="v">${esc(i.areaBusinessHead) || '-'}</span></div>
-    <div class="link-row"><span class="l">Tanggal Audit</span><span class="v">${esc(i.tanggalAudit)}</span></div>
-    <div class="link-row"><span class="l">Tipe Audit</span><span class="v">${esc(i.tipeAudit) || '-'}</span></div>
-    <div class="link-row"><span class="l">Koordinator</span><span class="v">${esc(i.koordinator) || '-'}</span></div>
-    <div class="link-row"><span class="l">Lokasi Audit (GPS)</span><span class="v">${a.lokasiAudit ? esc(formatCoord(a.lokasiAudit)) : '-'}</span></div>
-    <div class="link-row"><span class="l">Operator (S1/S2/S3)</span><span class="v">${esc(i.operatorTotal || '-')} (${esc(i.operatorShift1 || '-')}/${esc(i.operatorShift2 || '-')}/${esc(i.operatorShift3 || '-')})</span></div>
-    <div class="link-row"><span class="l">Nozzle</span><span class="v">${i.nozzles.length}${productCount.length ? ' · ' + productCount.map(([p, c]) => `${esc(p)} ${c}`).join(', ') : ''}</span></div>
-    ${umkBlock}
+  <div class="report-head">
+    <div class="rh-title">${esc(R.title)}</div>
+    <div class="rh-sub">${esc(R.unit)} &middot; No. Report <span class="mono">${esc(R.reportNo)}</span></div>
   </div>
 
   <div class="score-hero" style="background:${badge.bg};">
     <div class="num">${comp.ts.toFixed(2)}</div>
-    <div class="cls">${badge.text}</div>
-    <div class="sub">Target kelas: ${level === 'excellent' ? 'Pasti Pas Excellent' : 'Pasti Pas Good'} &middot; Minimum TS ${(TS_MIN[level] * 100).toFixed(0)}% &middot; ${comp.totalSubmitted}/${comp.totalItems} item tersubmit</div>
+    <div class="cls">${esc(R.clsText)}</div>
+    <div class="sub">${comp.totalSubmitted}/${comp.totalItems} item tersubmit${a.status === 'selesai' ? ' &middot; laporan terkirim' : ' &middot; draft'}</div>
   </div>
 
-  ${reasons.length ? `<div class="card" style="border:1.5px solid var(--red);">
+  ${R.reasons.length ? `<div class="card" style="border:1.5px solid var(--red);">
     <b style="color:var(--red);">Alasan Belum Lulus</b>
-    <ul class="komentar-list">${reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
+    <ul class="komentar-list">${R.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
   </div>` : ''}
-
   ${pinaltiHtml}
 
-  <div class="section-title">Indikator Penilaian</div>
-  <div class="card"><table class="report-table">
-    <tr><th>Indikator</th><th>Bobot</th><th>Min</th><th>Compliance</th></tr>
-    ${indikatorRows}
-  </table></div>
+  <div class="section-title">Informasi SPBU</div>
+  <div class="card kv-grid">${infoRows(R.infoSpbu)}</div>
+  <div class="section-title">Informasi Kegiatan Audit</div>
+  <div class="card kv-grid">${infoRows(R.infoAudit.filter((r) => r[0] || r[2]))}</div>
 
-  ${subRows}
-  ${densHtml}
-  ${teraHtml}
-  ${tenantHtml}
+  <div class="section-title">Ringkasan Indikator Penilaian</div>
+  <div class="card">${indikator}<p class="hint" style="margin-top:6px">Skor = Bobot Nilai &times; Compliance %.</p></div>
+
+  <div class="section-title">Rincian Sub-Elemen</div>
+  <div class="card">${subs}</div>
+
+  <div class="section-title">Pengecekan Q&amp;Q</div>
+  <div class="card">${qq}<p class="hint" style="margin-top:6px">Mode P = Preset, M = Manual &middot; batas tera ${TERA_LIMIT_ML} ml/20 L &middot; toleransi density &plusmn;0,003.</p></div>
 
   <div class="section-title">Komentar Auditor</div>
-  <div class="card">${komentarHtml}</div>
+  <div class="card">${komentar}</div>
+
+  <div class="section-title">Komentar Manajer SPBU</div>
+  <div class="card">
+    <div class="field" style="margin:0"><textarea data-info="komentarManajer" rows="3" placeholder="Opsional — tanggapan manajer SPBU atas hasil audit">${esc(a.info.komentarManajer || '')}</textarea></div>
+  </div>
 
   ${photoHtml}
   </div>
 
-  <button class="btn-primary" data-action="finish" style="margin-top:6px;">${a.status === 'selesai' ? 'Audit Ditandai Selesai &#10003;' : 'Tandai Audit Selesai'}</button>
-  <div style="height:8px"></div>
-  <button class="btn-secondary" data-action="sharetext">Bagikan Ringkasan (Teks)</button>`
+  <button class="btn-primary pdf-btn" data-action="pdf">Unduh Laporan PDF (A4)</button>
+  <p class="hint" style="text-align:center;margin-top:8px;">Format mengikuti laporan Excel: Ringkasan, Detail Checklist, Komentar Auditor, Pengecekan Q&amp;Q, lampiran foto.</p>`
 }
 
 /** Ganti thumbnail di laporan dengan foto ukuran penuh (dimuat dari IndexedDB). */
@@ -1125,61 +1266,38 @@ function hydrateFullPhotos() {
 }
 
 /* =========================================================
-   EXPORT / SHARE
+   EXPORT PDF (A4, vektor)
    ========================================================= */
-function shareTextSummary() {
-  const a = curAudit()
-  const comp = computeAudit(a)
-  const badge = classificationBadge(comp.classification)
-  const lines = [
-    'LAPORAN AUDIT PERTAMINA WAY',
-    `SPBU ${a.info.nomorSpbu} - ${a.info.kota}`,
-    `Tanggal: ${a.info.tanggalAudit}${a.info.areaBusinessHead ? ` | Area Business Head: ${a.info.areaBusinessHead}` : ''}`,
-    '',
-    `TOTAL SCORE: ${comp.ts.toFixed(2)} - ${badge.text}`,
-    '',
-  ]
-  CHECKLIST_TREE.forEach((el) => {
-    const er = comp.elementResults[el.code]
-    lines.push(`${el.title}: ${er.applicable > 0 ? (er.pct * 100).toFixed(1) + '%' : '-'}`)
-  })
-  const text = lines.join('\n')
-  if (navigator.share) {
-    navigator.share({ title: 'Laporan Audit Pertamina Way', text }).catch(() => {})
-  } else if (navigator.clipboard) {
-    navigator.clipboard.writeText(text).then(() => showToast('Ringkasan disalin ke clipboard'))
+/** Muat foto penuh sebagai JPEG dataURL (maks 900 px agar PDF tetap ringan). */
+async function loadPhotoForPdf(p) {
+  const blob = await photoBlob(p)
+  const src = blob ? URL.createObjectURL(blob) : thumbSrc(p)
+  try {
+    const img = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = src })
+    const scale = Math.min(1, 900 / Math.max(img.naturalWidth, img.naturalHeight))
+    const c = document.createElement('canvas')
+    c.width = Math.round(img.naturalWidth * scale)
+    c.height = Math.round(img.naturalHeight * scale)
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
+    return { data: c.toDataURL('image/jpeg', 0.72), w: c.width, h: c.height }
+  } finally {
+    if (blob) URL.revokeObjectURL(src)
   }
 }
 
 async function exportPDF() {
-  if (currentView !== 'report') { go('report', { auditId: currentAuditId }); await new Promise((r) => setTimeout(r, 150)) }
-  showToast('Menyiapkan PDF...')
-  const el = document.getElementById('reportContent')
-  if (!el) { showToast('Gagal membuat PDF'); return }
+  const a = curAudit()
+  if (!a) return
+  showToast('Menyiapkan PDF A4…', 15000)
   try {
-    await hydrateFullPhotos()
-    const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')])
-    const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#F5F5F7', useCORS: true })
-    const imgData = canvas.toDataURL('image/jpeg', 0.85)
-    const pdf = new jsPDF('p', 'pt', 'a4')
-    const pageW = pdf.internal.pageSize.getWidth()
-    const pageH = pdf.internal.pageSize.getHeight()
-    const imgH = canvas.height * pageW / canvas.width
-    let heightLeft = imgH
-    let position = 0
-    pdf.addImage(imgData, 'JPEG', 0, position, pageW, imgH)
-    heightLeft -= pageH
-    while (heightLeft > 0) {
-      position = heightLeft - imgH
-      pdf.addPage()
-      pdf.addImage(imgData, 'JPEG', 0, position, pageW, imgH)
-      heightLeft -= pageH
-    }
-    pdf.save(`Audit_PertaminaWay_${(curAudit().info.nomorSpbu || 'SPBU').replace(/\s+/g, '_')}.pdf`)
-    showToast('PDF berhasil diunduh')
+    const { createReportPdf } = await import('./lib/pdf.js')
+    const R = buildReport(a)
+    const doc = await createReportPdf(R, { loadPhoto: loadPhotoForPdf })
+    doc.save(R.fileName)
+    showToast(`✓ PDF ${doc.getNumberOfPages()} halaman diunduh`)
   } catch (e) {
     console.error(e)
-    showToast('Gagal membuat PDF: ' + e.message)
+    showToast('Gagal membuat PDF: ' + e.message, 4000)
   }
 }
 
@@ -1191,15 +1309,17 @@ function viewAbout() {
   <div class="card">
     <b>Cara Menggunakan</b>
     <ol style="font-size:14px;line-height:1.7;padding-left:18px;">
-      <li>Tekan <b>+ Mulai Audit SPBU Baru</b>, isi data SPBU, <b>data operator</b> (total &amp; per shift) dan <b>data nozzle</b> (nomor &amp; produk).</li>
-      <li>Izinkan akses <b>Lokasi (GPS)</b> dan <b>Kamera</b> saat diminta — checklist tidak bisa dibuka tanpa GPS.</li>
+      <li>Tekan <b>+ Mulai Audit SPBU Baru</b>, isi data SPBU, <b>auditor</b> (boleh lebih dari satu), <b>jumlah operator per shift</b> (Shift 1–3, NS, MD, OFF) dan <b>shift yang bertugas saat audit</b>.</li>
+      <li>Isi <b>jumlah nozzle</b> &rarr; tekan <b>Submit</b> &rarr; pilih nomor &amp; produk tiap nozzle.</li>
       <li>Periksa <b>Dashboard Item Pinalti</b> lebih dahulu bila perlu, atau langsung buka checklist lengkap.</li>
       <li>Gunakan kolom <b>Cari</b> (cth. “APAR”) untuk menemukan item sesuai area yang sedang diperiksa.</li>
-      <li>Beri nilai, ambil foto (kamera langsung, tercap tanggal-jam-GPS), lalu tekan <b>Submit</b> di tiap item.</li>
-      <li>Item density (2.2.f–2.2.l) menghitung <b>Density @15°C</b> otomatis dengan Tabel ASTM 53 dan membandingkan dengan pengiriman terakhir (±0,003).</li>
-      <li>Item 2.2.m memakai data nozzle untuk <b>tera bejana 20 L</b> (batas −60 ml).</li>
+      <li>Item operator: jumlah sampel terisi otomatis dari operator yang bertugas — cukup isi jumlah yang sesuai (dan nama operator yang tidak sesuai).</li>
+      <li>Beri nilai, ambil foto (kamera langsung, pratinjau dulu, tercap tanggal-jam &amp; <b>kode verifikasi</b>), lalu tekan <b>Submit</b>. Item terkunci; tekan <b>Edit</b> untuk mengubah.</li>
+      <li>Item density (2.2.f–2.2.l) menghitung <b>Hasil density</b> @15°C otomatis dengan Tabel ASTM 53 dan membandingkan dengan pengiriman terakhir (±0,003).</li>
+      <li>Item 2.2.m: tera bejana 20 L per nozzle, mode <b>P</b> (Preset) / <b>M</b> (Manual), batas −60 ml.</li>
       <li>Item 5.2.f diisi daftar <b>tenant</b> + foto tenant + foto izin prinsip berlaku.</li>
-      <li>Buka <b>Laporan</b> untuk hasil akhir, lalu unduh PDF.</li>
+      <li>Setelah semua item tersubmit, tekan <b>Submit Laporan</b>.</li>
+      <li>Buka <b>Laporan</b> untuk hasil akhir, lalu unduh <b>PDF A4</b>.</li>
     </ol>
   </div>
   <div class="card">
@@ -1232,7 +1352,7 @@ function viewAbout() {
     </table>
   </div>
   <div class="card" style="text-align:center;color:var(--muted);font-size:12px;">
-    Sumber rumus: SIMULASI_AUDIT_TERBARU_INTERTEK.xlsx &amp; Item_Pinalti_Pasti_Pas.pdf &middot; Tabel ASTM 53 dari aplikasi PANTAS<br>Data tersimpan otomatis di perangkat ini.
+    Sumber rumus: SIMULASI_AUDIT_TERBARU_INTERTEK.xlsx &amp; Item_Pinalti_Pasti_Pas.pdf &middot; Tabel ASTM 53 dari aplikasi PANTAS<br>Data tersimpan otomatis di perangkat ini dan tersinkron ke cloud tim.
   </div>`
 }
 
@@ -1262,10 +1382,8 @@ function summaryFor(a) {
 }
 
 function cloudLineHtml() {
-  if (!cloud.mod) return ''
-  if (!cloud.enabled) return `${iconCloud} Data hanya di perangkat ini &middot; <u>hubungkan cloud</u>`
-  if (!cloud.session) return `${iconCloud} Data hanya di perangkat ini &middot; <u>login untuk sinkron cloud</u>`
-  if (!cloud.role) return `${iconCloud} Tidak dapat memeriksa akun cloud`
+  if (!cloud.mod || !cloud.session) return ''
+  if (!cloud.role) return `${iconCloud} Tidak dapat memeriksa akun`
   const pend = pendingCount()
   if (cloud.status === 'syncing') return `${iconCloud} Menyinkronkan…`
   if (cloud.status === 'offline') return `${iconCloud} Offline &middot; ${pend} audit menunggu sinkron`
@@ -1275,7 +1393,14 @@ function cloudLineHtml() {
 
 function refreshCloudUi() {
   document.querySelectorAll('.cloud-line').forEach((el) => { el.innerHTML = cloudLineHtml() })
-  if (currentView === 'cloud') {
+  const landingShown = document.body.classList.contains('landing-mode')
+  const landingNeeded = !cloud.ready || !cloud.session
+  if (landingShown !== landingNeeded) {
+    if (!landingNeeded && !['home', 'history', 'about', 'account'].includes(currentView)) currentView = 'home'
+    render()
+    return
+  }
+  if (landingNeeded || currentView === 'account') {
     // Pertahankan isian form & fokus saat tab Cloud diperbarui (mis. setelah rekap selesai dimuat)
     const keyOf = (el) => el.id || (el.form && el.form.id && el.name ? `${el.form.id}:${el.name}` : '')
     const saved = new Map()
@@ -1297,6 +1422,9 @@ async function initCloud() {
     cloud.mod = await import('./lib/cloud.js')
   } catch (e) {
     console.warn('Modul cloud gagal dimuat', e)
+    cloud.loadError = 'Modul login gagal dimuat. Periksa koneksi lalu muat ulang halaman.'
+    cloud.ready = true
+    render()
     return
   }
   cloud.mod.onAuthChange((session) => {
@@ -1305,10 +1433,13 @@ async function initCloud() {
     if (changed) refreshRole()
   })
   await connectCloud()
+  cloud.ready = true
+  render()
 }
 
 /** (Ulang) sambungkan ke API cloud sesuai konfigurasi saat ini. */
 async function connectCloud() {
+  cloud.message = ''
   cloud.enabled = cloud.mod.isConfigured()
   cloud.session = cloud.enabled ? await cloud.mod.getSession() : null
   cloud.needsSetup = false
@@ -1439,6 +1570,7 @@ async function cloudLogout() {
   if (pendingCount() && !confirm(`${pendingCount()} audit belum tersinkron. Tetap keluar? (data tetap aman di perangkat ini)`)) return
   await cloud.mod.signOut()
   cloud.session = null
+  currentView = 'home'
   await refreshRole()
 }
 
@@ -1530,55 +1662,70 @@ function remoteListHtml() {
   }).join('')
 }
 
-function viewCloud() {
-  if (!cloud.mod) return `<div class="empty-state">Memuat modul cloud…</div>`
-  if (!cloud.enabled) {
-    return `
-    <div class="card">
-      <b>Hubungkan ke Cloud</b>
-      <p class="hint">Isi alamat API Cloudflare Worker milik tim audit (didapat saat deploy, mis. <code>https://audit-task-force.nama-anda.workers.dev</code>). Cukup sekali per perangkat. Tanpa ini aplikasi tetap bisa dipakai penuh, data tersimpan di HP.</p>
+/* ----- Landing page login (aplikasi hanya bisa dipakai setelah login) ----- */
+function viewLanding() {
+  const apiEditable = cloud.mod && !cloud.mod.apiFromEnv()
+  const serverBox = cloud.mod ? `
+    <details class="landing-server">
+      <summary>Pengaturan server</summary>
       <form id="apiForm">
-        <div class="field"><label>Alamat API</label><input name="apiUrl" type="url" inputmode="url" placeholder="https://…workers.dev" required></div>
-        <button class="btn-primary" type="submit">Simpan &amp; Hubungkan</button>
+        <div class="field"><label>Alamat API</label><input name="apiUrl" type="url" inputmode="url" value="${esc(cloud.mod.apiBase())}" placeholder="https://…workers.dev" required ${apiEditable ? '' : 'disabled'}></div>
+        ${apiEditable ? '<button class="btn-secondary" type="submit">Simpan Alamat</button>' : '<p class="hint">Alamat API diatur oleh aplikasi.</p>'}
       </form>
-    </div>`
-  }
-  const apiInfo = `<p class="hint" style="margin-top:10px;word-break:break-all;">API: ${esc(cloud.mod.apiBase())}${cloud.mod.apiFromEnv() ? '' : ' · <button class="link-danger" data-action="resetapi">ubah</button>'}</p>`
-  if (!cloud.session && cloud.needsSetup) {
-    return `
-    <div class="card">
-      <b>Buat Admin Pertama</b>
-      <p class="hint">Database cloud masih kosong. Isi <b>kode setup</b> = nilai rahasia yang Anda ketik di kolom <i>Value</i> saat membuat secret <code>SETUP_TOKEN</code> di Worker Cloudflare (bukan tulisan "SETUP_TOKEN"). Setelah admin dibuat, admin menambahkan auditor dari tab ini.</p>
+    </details>` : ''
+  const msg = cloud.loadError || cloud.message
+  let form
+  if (cloud.needsSetup) {
+    form = `
+      <h2>Buat Admin Pertama</h2>
+      <p class="landing-p">Server masih kosong. Isi <b>kode setup</b> = nilai rahasia <code>SETUP_TOKEN</code> di Worker Cloudflare.</p>
       <form id="setupForm" autocomplete="on">
-        <div class="field"><label>Kode setup</label><input name="setupToken" required autocomplete="off" placeholder="nilai rahasia SETUP_TOKEN"></div>
-        <div class="field"><label>Nama</label><input name="nama"></div>
+        <div class="field"><label>Kode setup</label><input name="setupToken" required autocomplete="off"></div>
+        <div class="field"><label>Nama</label><input name="nama" autocomplete="name"></div>
         <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
         <div class="field"><label>Password (min. 8 karakter)</label><input name="password" type="password" autocomplete="new-password" minlength="8" required></div>
-        <button class="btn-primary" type="submit">Buat Admin</button>
-      </form>
-      ${apiInfo}
-    </div>`
-  }
-  if (!cloud.session) {
-    return `
-    <div class="card">
-      <b>Masuk untuk Sinkronisasi Cloud</b>
-      <p class="hint">Tanpa login, aplikasi tetap bisa dipakai penuh dan data tersimpan di HP ini. Dengan login, setiap audit otomatis tersimpan ke cloud (termasuk foto) dan bisa direkap oleh Area Business Head.</p>
+        <button class="btn-primary" type="submit">Buat Admin &amp; Masuk</button>
+      </form>`
+  } else {
+    form = `
+      <h2>Masuk</h2>
+      <p class="landing-p">Gunakan akun yang dibuat admin audit.</p>
       <form id="loginForm" autocomplete="on">
         <div class="field"><label>Email</label><input name="email" type="email" autocomplete="username" required></div>
-        <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
+        <div class="field pw-field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required><button type="button" class="pw-eye" data-action="togglepw" aria-label="Tampilkan password">Lihat</button></div>
         <button class="btn-primary" type="submit">Masuk</button>
       </form>
-      <p class="hint" style="margin-top:10px;">Akun dibuat oleh admin audit di tab Cloud → Anggota.</p>
-      ${cloud.message ? `<p class="hint" style="color:var(--status-warning)">${esc(cloud.message)}</p>` : ''}
-      ${apiInfo}
-    </div>`
+      ${navigator.onLine ? '' : '<p class="landing-warn">Tidak ada koneksi internet. Login pertama kali memerlukan internet; setelah itu aplikasi bisa dipakai offline.</p>'}`
   }
+  return `
+  <div class="landing">
+    <div class="landing-hero">
+      <div class="brand-mark">PW</div>
+      <h1>Audit Pertamina Way</h1>
+      <p>Task Force Region VI Jatimbalinus</p>
+      <ul class="landing-feats">
+        <li><span>125</span>item checklist Pasti Pas</li>
+        <li><span>A4</span>laporan PDF siap kirim</li>
+        <li><span>&#10003;</span>foto ber-kode verifikasi</li>
+      </ul>
+    </div>
+    <div class="landing-card">
+      ${form}
+      ${msg ? `<p class="landing-warn">${esc(msg)}</p>` : ''}
+      ${serverBox}
+    </div>
+    <p class="landing-foot">Akses khusus tim audit &middot; data audit tersimpan di perangkat &amp; cloud tim</p>
+  </div>`
+}
+
+/* ----- Tab Akun: status sinkron, rekap, anggota, password ----- */
+function viewAccount() {
   const email = esc(cloud.session.user && cloud.session.user.email)
+  const nama = esc(currentUserName() || '')
   if (!cloud.role) {
     return `
     <div class="card">
-      <b>${email}</b>
+      <b>${nama || email}</b>
       <p class="hint">Tidak dapat memeriksa akun.${cloud.message ? `<br><span style="color:var(--status-warning)">${esc(cloud.message)}</span>` : ''}</p>
       <button class="btn-secondary" data-action="logout">Keluar</button>
     </div>`
@@ -1589,7 +1736,7 @@ function viewCloud() {
   const usageHtml = cloud.role === 'admin' && u ? (() => {
     const pct = Math.min(100, (u.photos.bytes / u.limitBytes) * 100)
     const mb = (b) => (b / 1024 / 1024).toLocaleString('id-ID', { maximumFractionDigits: 1 })
-    return `<div class="section-title">Kapasitas Cloud (admin)</div>
+    return `<div class="section-title">Kapasitas Penyimpanan (admin)</div>
     <div class="card">
       <div class="link-row"><span class="l">Penyimpanan foto</span><span class="v">${u.storage === 'r2' ? 'R2' : 'D1 (tanpa R2)'}</span></div>
       <div class="link-row"><span class="l">Foto tersimpan</span><span class="v">${u.photos.count} · ${mb(u.photos.bytes)} MB</span></div>
@@ -1613,10 +1760,12 @@ function viewCloud() {
       <p class="hint" style="margin-top:8px;">Email yang sudah terdaftar akan diperbarui (nama/peran); bila password diisi, password direset dan akun dibuka dari kunci.</p>
     </div>` : ''
   return `
-  <div class="card">
-    <div class="link-row"><span class="l">Akun</span><span class="v">${email}</span></div>
-    <div class="link-row"><span class="l">Peran</span><span class="v">${cloud.role}</span></div>
-    <div class="link-row"><span class="l">Status</span><span class="v">${cloud.status === 'syncing' ? 'Menyinkronkan…' : cloud.status === 'offline' ? 'Offline' : cloud.status === 'error' ? 'Gagal' : 'Siap'}</span></div>
+  <div class="card account-card">
+    <div class="account-head">
+      <div class="avatar">${esc(((currentUserName() || cloud.session.user.email || '?').trim()[0] || '?').toUpperCase())}</div>
+      <div><b>${nama || email}</b><div class="hint">${email} &middot; ${cloud.role === 'admin' ? 'Admin' : 'Auditor'}</div></div>
+    </div>
+    <div class="link-row"><span class="l">Status sinkron</span><span class="v">${cloud.status === 'syncing' ? 'Menyinkronkan…' : cloud.status === 'offline' ? 'Offline' : cloud.status === 'error' ? 'Gagal' : 'Siap'}</span></div>
     <div class="link-row"><span class="l">Menunggu sinkron</span><span class="v">${pend} audit</span></div>
     <div class="link-row"><span class="l">Sinkron terakhir</span><span class="v">${cloud.lastSync ? fmtDate(cloud.lastSync) + ' ' + fmtTime(cloud.lastSync) : '-'}</span></div>
     ${cloud.status === 'error' && cloud.message ? `<p class="hint" style="color:var(--status-warning)">${esc(cloud.message)}</p>` : ''}
@@ -1631,7 +1780,6 @@ function viewCloud() {
         <button class="btn-secondary" type="submit">Simpan Password</button>
       </form>
     </details>
-    ${`<p class="hint" style="margin-top:10px;word-break:break-all;">API: ${esc(cloud.mod.apiBase())}</p>`}
   </div>
 
   <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;">Rekap Audit Semua SPBU <button class="btn-mini ghost" data-action="loadremote">Muat ulang</button></div>
@@ -1687,7 +1835,25 @@ function onClick(ev) {
   if (action) {
     if (action === 'newaudit') { const id = newAudit(); pinaltiFilter = null; searchQuery = ''; currentElementOpen = null; go('form', { auditId: id }) }
     else if (action === 'tochecklist') enterChecklist()
-    else if (action === 'gpsretry') { closeModal(); if (currentView === 'form') enterChecklist(); else requireGps().then(() => showToast('GPS aktif')).catch((e) => showModal(gpsHelpHtml(e))) }
+    else if (action === 'addauditor') {
+      const a = curAudit()
+      a.info.auditors = (a.info.auditors || []).concat([''])
+      persist(a.id)
+      render()
+      const inputs = document.querySelectorAll('[data-auditor]')
+      if (inputs.length) inputs[inputs.length - 1].focus()
+    }
+    else if (action === 'nozzlesubmit') {
+      const inp = document.getElementById('nozzleCount')
+      const n = parseInt(inp && inp.value, 10)
+      if (!n || n < 1) { showToast('Isi jumlah nozzle (minimal 1)'); return }
+      const a = curAudit()
+      if (n < a.info.nozzles.length && !confirm(`Kurangi nozzle dari ${a.info.nozzles.length} menjadi ${n}? Data tera nozzle yang dihapus ikut hilang.`)) return
+      nozzleDraft = null
+      resizeNozzles(n)
+      showToast(`✓ ${n} nozzle — pilih nomor & produk tiap nozzle`)
+    }
+    else if (action === 'submitreport') submitReport()
     else if (action === 'deleteaudit') {
       if (confirm('Hapus audit ini beserta seluruh data & foto?')) {
         const id = currentAuditId
@@ -1704,13 +1870,11 @@ function onClick(ev) {
     }
     else if (action === 'goreport') go('report', { auditId: currentAuditId })
     else if (action === 'pdf') exportPDF()
-    else if (action === 'finish') { curAudit().status = 'selesai'; persist(currentAuditId); showToast('Audit ditandai selesai'); render() }
-    else if (action === 'sharetext') shareTextSummary()
     else if (action === 'syncnow') syncNow(true)
-    else if (action === 'resetapi') {
-      if (confirm('Ubah alamat API cloud? Anda akan keluar dari akun cloud di perangkat ini.')) {
-        cloud.mod.signOut().finally(() => { cloud.mod.setApiBase(''); connectCloud() })
-      }
+    else if (action === 'togglepw') {
+      const inp = t.closest('.pw-field').querySelector('input')
+      inp.type = inp.type === 'password' ? 'text' : 'password'
+      t.closest('[data-action]').textContent = inp.type === 'password' ? 'Lihat' : 'Tutup'
     }
     else if (action === 'logout') cloudLogout()
     else if (action === 'loadremote') loadRemote()
@@ -1749,9 +1913,49 @@ function onClick(ev) {
     return
   }
 
+  const viewPhoto = t.closest('[data-viewphoto]')
+  if (viewPhoto) { openPhotoViewer(viewPhoto.dataset.viewphoto); return }
+
+  const rmAuditor = t.closest('[data-rmauditor]')
+  if (rmAuditor) {
+    const a = curAudit()
+    a.info.auditors.splice(+rmAuditor.dataset.rmauditor, 1)
+    persist(a.id)
+    render()
+    return
+  }
+
+  const shiftChip = t.closest('[data-shiftaudit]')
+  if (shiftChip) {
+    const a = curAudit()
+    const id = shiftChip.dataset.shiftaudit
+    const list = a.info.shiftAudit || (a.info.shiftAudit = [])
+    const k = list.indexOf(id)
+    if (k >= 0) list.splice(k, 1); else list.push(id)
+    persist(a.id)
+    shiftChip.classList.toggle('on', k < 0)
+    const sum = document.getElementById('opSummary')
+    if (sum) sum.innerHTML = operatorSummaryHtml(a)
+    return
+  }
+
+  const teraMode = t.closest('[data-teramode]')
+  if (teraMode) {
+    if (isLocked(TERA_ITEM)) return
+    const [nid, mode] = teraMode.dataset.teramode.split('|')
+    const r = getResult(curAudit(), TERA_ITEM)
+    setResult(TERA_ITEM, { teraMode: { ...(r.teraMode || {}), [nid]: mode } })
+    teraMode.parentElement.querySelectorAll('.pm').forEach((b) => b.classList.toggle('on', b === teraMode))
+    return
+  }
+
+  const editBtn = t.closest('[data-edit]')
+  if (editBtn) { editItem(editBtn.dataset.edit); return }
+
   const gradeBtn = t.closest('.grade-btn')
   if (gradeBtn) {
     const code = gradeBtn.dataset.code
+    if (isLocked(code)) return
     const g = gradeBtn.dataset.grade
     const r = getResult(curAudit(), code)
     setResult(code, { grade: r.grade === g ? null : g })
@@ -1765,6 +1969,7 @@ function onClick(ev) {
   const noteT = t.closest('[data-notetoggle]')
   if (noteT) {
     const code = noteT.dataset.notetoggle
+    if (isLocked(code)) return
     if (noteOpenSet.has(code)) noteOpenSet.delete(code); else noteOpenSet.add(code)
     render()
     return
@@ -1773,6 +1978,7 @@ function onClick(ev) {
   const photoBtn = t.closest('[data-photo]')
   if (photoBtn) {
     const code = photoBtn.dataset.photo
+    if (isLocked(code)) return
     takePhoto(`Item ${code}`).then((photo) => {
       if (!photo) return
       const r = getResult(curAudit(), code)
@@ -1786,6 +1992,7 @@ function onClick(ev) {
   const rmPhoto = t.closest('[data-rmphoto]')
   if (rmPhoto) {
     const code = rmPhoto.dataset.rmphoto
+    if (isLocked(code)) return
     const idx = parseInt(rmPhoto.dataset.idx, 10)
     if (!confirm('Hapus foto ini?')) return
     const r = getResult(curAudit(), code)
@@ -1868,10 +2075,27 @@ function onInput(ev) {
     const a = curAudit()
     a.info[t.dataset.info] = t.value
     persist(a.id)
-    if (t.dataset.info.startsWith('operator')) {
-      const h = document.getElementById('opHint')
-      if (h) h.innerHTML = operatorHint(a.info)
-    }
+    return
+  }
+
+  if (t.dataset.auditor !== undefined) {
+    const a = curAudit()
+    a.info.auditors[+t.dataset.auditor] = t.value
+    persist(a.id)
+    return
+  }
+
+  if (t.dataset.op) {
+    const a = curAudit()
+    a.info.operators[t.dataset.op] = t.value
+    persist(a.id)
+    const sum = document.getElementById('opSummary')
+    if (sum) sum.innerHTML = operatorSummaryHtml(a)
+    return
+  }
+
+  if (t.id === 'nozzleCount') {
+    nozzleDraft = t.value
     return
   }
 
@@ -1983,7 +2207,8 @@ async function init() {
     showToast('Penyimpanan perangkat tidak tersedia: ' + e.message, 5000)
   }
   render()
-  migrateOldPhotos().then(initCloud)
+  initCloud()
+  migrateOldPhotos()
 }
 
 /** Sekali jalan: pindahkan foto format lama (dataURL di dalam audit) ke store foto terpisah. */

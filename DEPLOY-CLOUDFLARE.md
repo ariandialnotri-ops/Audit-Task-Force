@@ -10,7 +10,7 @@ Cloud aplikasi Audit Pertamina Way berjalan di akun Cloudflare Anda sendiri, ter
 
 Nama Worker, database, dan bucket boleh diganti (mis. Worker bernama `audit-task-force`); yang **wajib persis** hanya nama variabel binding: `DB`, secret `SETUP_TOKEN`, dan (bila memakai R2) `PHOTOS`.
 
-**Tanpa kartu kredit/debit:** R2 tidak wajib. Tanpa binding `PHOTOS`, foto otomatis disimpan di tabel `photos` D1 (gratis ±500 MB per database). Aplikasi mengecilkan foto ke ±1024 px (±80–100 KB) sebelum upload → muat ±5.000 foto. Admin bisa memantau pemakaian di tab **Cloud → Kapasitas Cloud**. Bila nanti punya kartu/PayPal, cukup buat bucket R2 dan tambahkan binding `PHOTOS` — tanpa mengubah aplikasi.
+**Tanpa kartu kredit/debit:** R2 tidak wajib. Tanpa binding `PHOTOS`, foto otomatis disimpan di tabel `photos` D1 (gratis ±500 MB per database). Aplikasi mengecilkan foto ke ±1024 px (±80–100 KB) sebelum upload → muat ±5.000 foto. Admin bisa memantau pemakaian di tab **Akun → Kapasitas Penyimpanan**. Bila nanti punya kartu/PayPal, cukup buat bucket R2 dan tambahkan binding `PHOTOS` — tanpa mengubah aplikasi.
 
 Aplikasi web (Vercel) cukup diberi alamat API Worker. Semua langkah bisa lewat **Dashboard** (tanpa install apa pun) atau lewat **CLI**.
 
@@ -68,17 +68,17 @@ npm run deploy
 *Workers & Pages* → **Create** → *Import a repository* → pilih `Audit-Task-Force` → **Next**:
 - **Project name: `task-force-audit-app`** — WAJIB berbeda dari Worker API `audit-task-force` (nama sama = API tertimpa). Nama ini juga yang tertulis di `wrangler.jsonc` di root repo.
 - Build command: `npm run build` · Deploy command: `npx wrangler deploy` · Path: `/` (root)
-- Hasil: `https://task-force-audit-app.<akun>.workers.dev`. Header kamera/GPS diatur di `public/_headers`.
+- Hasil: `https://task-force-audit-app.<akun>.workers.dev`. Header izin kamera diatur di `public/_headers`.
 
 ## Sambungkan aplikasi
 
 - **Vercel (disarankan):** Project → *Settings* → *Environment Variables* → `VITE_AUDIT_API_URL` = alamat Worker → **Redeploy**. Semua HP langsung terhubung.
-- **Tanpa env:** di aplikasi buka tab **Cloud** → isi *Alamat API* sekali per HP.
+- **Tanpa env:** aplikasi memakai Worker default; bila perlu diganti, buka *Pengaturan server* di landing page login.
 
 ## Admin pertama & anggota
 
-1. Buka tab **Cloud** → muncul form **Buat Admin Pertama** → isi *kode setup* (`SETUP_TOKEN`), nama, email, password.
-2. Admin menambah auditor di tab **Cloud → Anggota** (email, nama, peran, password awal) lalu memberikan password awal ke auditor. Auditor bisa mengganti password sendiri di tab Cloud.
+1. Buka aplikasi → landing page menampilkan **Buat Admin Pertama** (hanya selama server kosong) → isi *kode setup* (`SETUP_TOKEN`), nama, email, password.
+2. Admin menambah auditor di tab **Akun → Anggota** (email, nama, peran, password awal) lalu memberikan password awal ke auditor. Aplikasi hanya bisa dipakai setelah login; auditor bisa mengganti password sendiri di tab Akun.
 3. Lupa password / akun terkunci (5× salah → 15 menit): admin isi ulang email + password baru di form anggota.
 
 ## Kuota gratis Cloudflare (perkiraan, cek halaman harga Cloudflare)
