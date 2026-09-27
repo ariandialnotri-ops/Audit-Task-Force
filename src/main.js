@@ -1818,11 +1818,6 @@ function viewLanding() {
       <div class="brand-logo">${LOGO_MARK}</div>
       <div class="wordmark"><span class="wm-top">TASK F<b class="wm-o">O</b>RCE</span><span class="wm-pill">AUDIT SPBU<i></i><i></i><i></i></span></div>
       <p>Region VI Jatimbalinus &middot; Pertamina Way</p>
-      <ul class="landing-feats">
-        <li><span>125</span>item checklist Pasti Pas</li>
-        <li><span>A4</span>laporan PDF siap kirim</li>
-        <li><span>&#10003;</span>foto ber-kode verifikasi</li>
-      </ul>
     </div>
     <div class="landing-card">
       ${form}
