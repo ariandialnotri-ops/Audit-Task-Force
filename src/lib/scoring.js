@@ -49,13 +49,24 @@ export const TIERED_ITEMS = ['4.3.f', '5.1.f', '5.2.g']
 
 /* ------------------------------------------------------------------ */
 
+/** Skala dari Excel sumber, mis. "A/C/F/X": N/A (X) hanya boleh bila skala memuat X. */
+export function scaleAllowsNA(scale) {
+  return String(scale || '').replace(/\s/g, '').split('/').includes('X')
+}
+
+/** Label skala rapi untuk ditampilkan, mis. "A–F · N/A". */
+export function scaleLabel(it) {
+  const g = it.allowed.length === 6 ? 'A–F' : it.allowed.join('/')
+  return scaleAllowsNA(it.scale) ? `${g} · N/A` : g
+}
+
 export function allItems() {
   const out = []
   CHECKLIST_TREE.forEach((el) => {
     el.subs.forEach((sub) => {
-      sub.items.forEach((it) => out.push({ ...it, elCode: el.code, elTitle: el.title, subCode: sub.code, subTitle: sub.title, ssCode: null, ssTitle: null }))
+      sub.items.forEach((it) => out.push({ ...it, allowNA: scaleAllowsNA(it.scale), elCode: el.code, elTitle: el.title, subCode: sub.code, subTitle: sub.title, ssCode: null, ssTitle: null }))
       sub.subsubs.forEach((ss) => {
-        ss.items.forEach((it) => out.push({ ...it, elCode: el.code, elTitle: el.title, subCode: sub.code, subTitle: sub.title, ssCode: ss.code, ssTitle: ss.title }))
+        ss.items.forEach((it) => out.push({ ...it, allowNA: scaleAllowsNA(it.scale), elCode: el.code, elTitle: el.title, subCode: sub.code, subTitle: sub.title, ssCode: ss.code, ssTitle: ss.title }))
       })
     })
   })

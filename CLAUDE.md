@@ -54,6 +54,7 @@ Audit juga punya `syncedAt` (versi `updatedAt` terakhir yang sudah terkirim ke c
 ## Rumus skoring (jangan diubah tanpa verifikasi ulang ke sumber Excel)
 
 - Nilai per grade: `A=1, B=0.8, C=0.6, D=0.4, E=0.2, F=0`. `X` = N/A, dikeluarkan dari pembilang & penyebut.
+- Skala per item mengikuti kolom `scale` Excel (mis. `A/F`, `A-F`, `A/C/F/X`): tombol nilai = `allowed`, dan **N/A hanya untuk item yang skalanya memuat `X`** (20 item, `allowNA`). Submit menolak nilai di luar skala.
 - Compliance suatu grup (sub-sub-elemen / sub-elemen / elemen) = `Σ(bobot × nilai)` item yang sudah dinilai (bukan X) ÷ `Σ(bobot)` item yang sudah dinilai (bukan X).
 - Total Score (TS) = `Σ (compliance elemen × bobot elemen)`, bobot elemen: 3S=30, Q&Q=30, RFS=20, VFC=10, EPO=10 (total 100).
 - Ambang minimum kelulusan (persis dari sheet `Report Good` / `Report Excellent` di file Excel sumber):

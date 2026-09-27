@@ -83,3 +83,14 @@ test('pencarian beberapa kata & kode item', () => {
   assert.deepEqual(searchItems('2.2.m').map((h) => h.code), ['2.2.m'])
   assert.ok(searchItems('density pertamax').some((h) => h.code === '2.2.g'))
 })
+
+test('N/A hanya untuk item berskala /X (sesuai Excel sumber)', async () => {
+  const { ITEM_BY_CODE, scaleLabel } = await import('../src/lib/scoring.js')
+  const na = ALL_ITEMS.filter((i) => i.allowNA).map((i) => i.code)
+  assert.equal(na.length, 20)
+  for (const c of ['1.2.c', '1.2.d', '2.2.f', '2.2.l', '3.1.3.a', '3.1.1.n', '5.1.h']) assert.ok(na.includes(c), c)
+  for (const c of ['1.1.1.a', '2.2.m', '3.1.4.a', '5.2.f']) assert.ok(!na.includes(c), c)
+  assert.equal(scaleLabel(ITEM_BY_CODE['1.1.1.a']), 'A/F')
+  assert.equal(scaleLabel(ITEM_BY_CODE['1.2.g']), 'A–F · N/A')
+  assert.equal(scaleLabel(ITEM_BY_CODE['3.1.3.a']), 'A/C · N/A')
+})

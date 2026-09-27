@@ -3,7 +3,7 @@ import { CHECKLIST_TREE, PINALTI_META } from './data/checklist.js'
 import {
   ALL_ITEMS, TOTAL_ITEM_COUNT, ITEM_BY_CODE, ELEMENT_MIN, TS_MIN, PRODUCTS,
   DENSITY_ITEMS, TERA_ITEM, TERA_LIMIT_ML, TENANT_ITEM, TENANT_CATEGORIES,
-  emptyResult, getResult, computeAudit, reasonsForFail, evalDensity, evalTera, evalTenants,
+  emptyResult, getResult, computeAudit, scaleLabel, reasonsForFail, evalDensity, evalTera, evalTenants,
   productsFromNozzles, searchItems,
 } from './lib/scoring.js'
 import { DENSITY_TOLERANCE, METHOD_LABEL } from './lib/density.js'
@@ -453,8 +453,14 @@ function statusChip(r) {
 }
 
 function gradeRowHtml(it, r) {
+  // Hanya nilai sesuai skala item (Excel sumber). N/A hanya untuk item berskala "/X";
+  // tetap ditampilkan bila data lama sudah terlanjur N/A agar bisa dibatalkan.
+  const showNA = it.allowNA || r.grade === 'X'
+  const invalid = r.grade && r.grade !== 'X' && !it.allowed.includes(r.grade)
   return it.allowed.map((g) => `<button class="grade-btn g-${g} ${r.grade === g ? 'sel-' + g : ''}" data-grade="${g}" data-code="${it.code}">${g}</button>`).join('')
-    + `<button class="grade-btn g-X ${r.grade === 'X' ? 'sel-X' : ''}" data-grade="X" data-code="${it.code}">N/A</button>`
+    + (showNA ? `<button class="grade-btn g-X ${r.grade === 'X' ? 'sel-X' : ''} ${it.allowNA ? '' : 'na-invalid'}" data-grade="X" data-code="${it.code}">N/A</button>` : '')
+    + `<span class="scale-tag">Skala ${esc(scaleLabel(it))}</span>`
+    + ((r.grade === 'X' && !it.allowNA) || invalid ? `<div class="scale-warn">Nilai ${r.grade === 'X' ? 'N/A' : r.grade} tidak ada di skala item ini — pilih ulang.</div>` : '')
 }
 
 function autoGradeInfo(a, code) {
@@ -841,7 +847,9 @@ function refreshCheckBody() {
 function validateItem(a, code) {
   const r = getResult(a, code)
   const errs = []
-  if (!r.grade) errs.push('Pilih nilai (A–F atau N/A) terlebih dahulu.')
+  const it = ITEM_BY_CODE[code]
+  if (!r.grade) errs.push(`Pilih nilai (skala ${scaleLabel(it)}) terlebih dahulu.`)
+  else if (r.grade === 'X' ? !it.allowNA : !it.allowed.includes(r.grade)) errs.push(`Nilai ${r.grade === 'X' ? 'N/A' : r.grade} tidak sesuai skala item ini (${scaleLabel(it)}).`)
   if (r.grade && r.grade !== 'X') {
     if (DENSITY_ITEMS[code]) {
       const e = evalDensity(r)
