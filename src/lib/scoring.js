@@ -148,10 +148,50 @@ export function evalTera(audit) {
   })
   const failRows = rows.filter((r) => r.ok === false)
   const coverageOk = rows.length > 0 && Object.values(byProduct).every((p) => p.coverageOk)
+  const testedCount = rows.filter((r) => r.tested).length
+  const provisional = testedCount ? teraGradeByTable(testedCount, failRows.length) : null
+  // F pasti bila, walau semua nozzle diperiksa, jumlah nozzle gagal tetap masuk kategori F.
+  const certainF = failRows.length > 0 && teraGradeByTable(rows.length, failRows.length) === 'F'
   let autoGrade = null
-  if (failRows.length) autoGrade = 'F'
-  else if (coverageOk) autoGrade = 'A'
-  return { level, rows, byProduct: Object.values(byProduct), failRows, coverageOk, autoGrade, testedCount: rows.filter((r) => r.tested).length }
+  if (coverageOk) autoGrade = provisional
+  else if (certainF) autoGrade = 'F'
+  return { level, rows, byProduct: Object.values(byProduct), failRows, coverageOk, autoGrade, provisional, testedCount }
+}
+
+/**
+ * Tabel "Ketentuan nilai" tera bejana ukur 20 L dari Audit Guideline (hal. 31):
+ * nilai ditentukan dari jumlah nozzle yang dicek dan jumlah nozzle di bawah toleransi −60 ml/20 L.
+ */
+export function teraGradeByTable(checked, red) {
+  if (!red) return 'A'
+  if (checked <= 3) return 'F'
+  if (checked <= 8) return red <= 1 ? 'C' : 'F'
+  if (checked <= 14) return red <= 2 ? 'C' : 'F'
+  if (checked <= 30) return red <= 3 ? 'C' : 'F'
+  if (checked <= 60) return red <= 4 ? 'C' : 'F'
+  if (red <= 2) return 'B'
+  return red <= 6 ? 'C' : 'F'
+}
+
+/**
+ * Nilai dari persentase kesesuaian (kriteria guideline).
+ * type: 'A-F' (100/80/60/40/20), 'ACF' (100/60), 'AF' (100), 'ABCF' (100/80/60).
+ */
+export function gradeFromPct(type, ok, total) {
+  const o = parseAngka(ok)
+  const n = parseAngka(total)
+  if (o === null || n === null || n <= 0 || o < 0 || o > n) return null
+  const pct = (o / n) * 100
+  const full = o === n
+  if (type === 'AF') return full ? 'A' : 'F'
+  if (type === 'ACF') return full ? 'A' : pct >= 60 ? 'C' : 'F'
+  if (type === 'ABCF') return full ? 'A' : pct >= 80 ? 'B' : pct >= 60 ? 'C' : 'F'
+  if (full) return 'A'
+  if (pct >= 80) return 'B'
+  if (pct >= 60) return 'C'
+  if (pct >= 40) return 'D'
+  if (pct >= 20) return 'E'
+  return 'F'
 }
 
 /* ------------------------------ Tenant ------------------------------- */
@@ -329,6 +369,11 @@ const SYNONYMS = {
 export function searchItems(query) {
   const words = normalize(query).split(/\s+/).filter(Boolean)
   if (!words.length) return []
+  // Pencarian kode item (mis. "1.2.f" atau "3.1.4") → cocokkan dari awal kode
+  if (words.length === 1 && /^\d+(\.[0-9a-z]+)*\.?$/.test(words[0])) {
+    const q = words[0].replace(/\.$/, '')
+    return ALL_ITEMS.filter((it) => it.code === q || it.code.startsWith(q + '.'))
+  }
   return ALL_ITEMS.filter((it) => {
     const hay = normalize([it.code, it.desc, it.elTitle, it.subTitle, it.ssTitle, PINALTI_META[it.code] && PINALTI_META[it.code].label, DENSITY_ITEMS[it.code]].join(' '))
     // Istilah yang punya sinonim dicocokkan per kata utuh (agar "apab" tidak cocok ke

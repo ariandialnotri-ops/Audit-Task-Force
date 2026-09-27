@@ -59,6 +59,10 @@ Gaya visual mengikuti design system **AeroShift SPBU** (lihat `DESIGN.md`) — i
 - **Syarat Excellent**: minimal 1 tenant internasional + 1 tenant nasional dengan izin prinsip berlaku.
 - Item 5.2.f **daftar tenant**: nama, kategori, no. izin, berlaku s/d, foto tenant & foto izin prinsip.
 
+- **Kriteria nilai dari Audit Guideline 2025** di setiap item (buka "Kriteria nilai"), nilai terpilih disorot; skala nilai dicocokkan dengan guideline (koreksi: 3.1.4.r Instalasi listrik menjadi A–F). N/A hanya untuk item berskala "/X".
+- **Kalkulator "% sesuai"** untuk item berbasis persentase (mis. 7 dari 10 operator = 70% → C).
+- **Tera 2.2.m** dinilai otomatis A/B/C/F memakai tabel ketentuan guideline (jumlah nozzle dicek vs jumlah di bawah −60 ml).
+
 **Dari v1**
 
 - Checklist 125 item, terstruktur elemen → sub-elemen → (sub-sub-elemen) → item.

@@ -1,10 +1,11 @@
 import './styles.css'
 import { CHECKLIST_TREE, PINALTI_META } from './data/checklist.js'
+import { GUIDELINE } from './data/guideline.js'
 import {
   ALL_ITEMS, TOTAL_ITEM_COUNT, ITEM_BY_CODE, ELEMENT_MIN, TS_MIN, PRODUCTS,
   DENSITY_ITEMS, TERA_ITEM, TERA_LIMIT_ML, TENANT_ITEM, TENANT_CATEGORIES,
   emptyResult, getResult, computeAudit, scaleLabel, reasonsForFail, evalDensity, evalTera, evalTenants,
-  productsFromNozzles, searchItems,
+  productsFromNozzles, searchItems, gradeFromPct, teraGradeByTable,
 } from './lib/scoring.js'
 import { DENSITY_TOLERANCE, METHOD_LABEL } from './lib/density.js'
 import { formatDensity, formatSigned, formatNumber, parseAngka } from './lib/format.js'
@@ -20,6 +21,7 @@ let currentAuditId = null
 let currentView = 'home'
 let currentElementOpen = null
 let noteOpenSet = new Set()
+const critOpenSet = new Set()
 let searchQuery = ''
 let pinaltiFilter = null // null | 'all' | elCode
 
@@ -470,12 +472,18 @@ function autoGradeInfo(a, code) {
     if (e.autoGrade) return { grade: e.autoGrade, why: `selisih ${formatSigned(e.selisih)} ${e.ok ? 'dalam' : 'melebihi'} toleransi ±${String(DENSITY_TOLERANCE).replace('.', ',')}` }
   } else if (code === TERA_ITEM) {
     const e = evalTera(a)
-    if (e.autoGrade === 'F') return { grade: 'F', why: `${e.failRows.length} nozzle melebihi batas ${TERA_LIMIT_ML} ml` }
-    if (e.autoGrade === 'A') return { grade: 'A', why: 'semua nozzle diperiksa dalam batas & cakupan terpenuhi' }
+    if (e.autoGrade) {
+      return { grade: e.autoGrade, why: e.coverageOk
+        ? `${e.testedCount} nozzle dicek, ${e.failRows.length} di bawah ${TERA_LIMIT_ML} ml (tabel ketentuan guideline)`
+        : `${e.failRows.length} nozzle di bawah ${TERA_LIMIT_ML} ml — tetap F walau semua nozzle dicek` }
+    }
   } else if (code === TENANT_ITEM) {
     const e = evalTenants(a)
     if (e.autoGrade === 'A') return { grade: 'A', why: 'semua tenant punya izin prinsip berlaku' }
     if (e.autoGrade === 'F') return { grade: 'F', why: 'ada tenant tanpa izin prinsip berlaku / foto izin' }
+  } else if (GUIDELINE[code] && GUIDELINE[code].pct && r.pct) {
+    const g = gradeFromPct(GUIDELINE[code].pct, r.pct.ok, r.pct.n)
+    if (g) return { grade: g, why: `${r.pct.ok} dari ${r.pct.n} sesuai (${Math.round((parseAngka(r.pct.ok) / parseAngka(r.pct.n)) * 100)}%) — kriteria guideline` }
   }
   return null
 }
@@ -545,7 +553,8 @@ function teraStatusHtml(row) {
 function teraOutHtml(a) {
   const e = evalTera(a)
   if (!e.rows.length) return ''
-  return `<div class="calc-sec" style="margin-top:4px">Cakupan per produk (target ${e.level === 'excellent' ? '100%' : '50%'})</div>
+  return `<div class="out-row"><span>Nozzle dicek / di bawah toleransi</span><b>${e.testedCount} / ${e.failRows.length}${e.provisional ? ` → ${e.coverageOk ? '' : 'sementara '}${e.provisional}` : ''}</b></div>
+    <div class="calc-sec" style="margin-top:4px">Cakupan per produk (target ${e.level === 'excellent' ? '100%' : '50%'})</div>
     ${e.byProduct.map((p) => `<div class="out-row"><span>${esc(p.produk)}</span><b>${p.tested}/${p.total} diperiksa · min ${p.required} ${p.coverageOk ? '<span style="color:var(--status-good)">✓</span>' : '<span style="color:var(--status-poor)">kurang</span>'}${p.fail ? ` · <span style="color:var(--status-warning)">${p.fail} gagal</span>` : ''}</b></div>`).join('')}`
 }
 
@@ -554,7 +563,7 @@ function teraBlock(a) {
   const tera = getResult(a, TERA_ITEM).tera || {}
   return `<div class="calc">
     <div class="calc-head">Tera Bejana Ukur 20 L per Nozzle <span class="mini-pill">batas ${TERA_LIMIT_ML} ml</span></div>
-    <div class="hint">Isi selisih volume (ml) nozzle yang diperiksa: negatif = kurang, positif = lebih. Kurang dari ${TERA_LIMIT_ML} ml = gagal. Kosongkan nozzle yang tidak diperiksa.</div>
+    <div class="hint">Isi selisih volume (ml) nozzle yang diperiksa: negatif = kurang, positif = lebih. Kurang dari ${TERA_LIMIT_ML} ml = di bawah toleransi (Red). Kosongkan nozzle yang tidak diperiksa. Nilai A/B/C/F mengikuti tabel ketentuan guideline (jumlah nozzle dicek vs jumlah Red).</div>
     ${!e.rows.length ? `<div class="res-pill warn" style="margin:8px 0">Data nozzle belum diisi.</div><button class="btn-ghost" data-back="form">Isi Data Nozzle</button>` : `
     <table class="tera-table">
       <tr><th>Nozzle</th><th>Produk</th><th>Selisih (ml)</th><th></th></tr>
@@ -638,6 +647,33 @@ function specialBlock(a, it) {
   return ''
 }
 
+const PCT_LABEL = { 'A-F': 'A 100% · B ≥80% · C ≥60% · D ≥40% · E ≥20% · F <20%', ACF: 'A 100% · C ≥60% · F <60%', AF: 'A 100% · F <100%', ABCF: 'A 100% · B ≥80% · C ≥60% · F <60%' }
+
+/** Kalkulator "% sesuai" untuk item yang kriteria guideline-nya berbasis persentase. */
+function pctBlock(it, r) {
+  const g = GUIDELINE[it.code]
+  if (!g || !g.pct) return ''
+  const p = r.pct || {}
+  return `<div class="pct-row">
+    <span class="pct-label">Hitung dari sampel</span>
+    <input data-pct="${it.code}" data-pf="ok" inputmode="numeric" value="${esc(p.ok)}" placeholder="sesuai">
+    <span>dari</span>
+    <input data-pct="${it.code}" data-pf="n" inputmode="numeric" value="${esc(p.n)}" placeholder="total">
+    <div class="pct-rule">${PCT_LABEL[g.pct]}</div>
+  </div>`
+}
+
+/** Kriteria nilai dari Audit Guideline (dapat dibuka/tutup), nilai yang dipilih disorot. */
+function criteriaHtml(it, r) {
+  const g = GUIDELINE[it.code]
+  if (!g) return ''
+  const rows = Object.entries(g.crit).map(([k, v]) => `<li class="${r.grade === k ? 'on' : ''}"><b>${k === 'X' ? 'N/A' : k}</b> ${esc(v.replace(/^Jika\s+/i, ''))}</li>`).join('')
+  return `<details class="crit"${critOpenSet.has(it.code) ? ' open' : ''} data-critdetails="${it.code}">
+    <summary>Kriteria nilai · Guideline ${esc(g.ref)}</summary>
+    <ul>${rows}</ul>
+  </details>`
+}
+
 function itemCardHtml(a, it, opts = {}) {
   const r = getResult(a, it.code)
   const meta = PINALTI_META[it.code]
@@ -652,8 +688,10 @@ function itemCardHtml(a, it, opts = {}) {
     </div>
     <div class="desc">${esc(it.desc)}</div>
     ${specialBlock(a, it)}
+    ${pctBlock(it, r)}
     <div class="grade-row" data-graderow="${it.code}">${gradeRowHtml(it, r)}</div>
     <div data-autohint="${it.code}">${autoHintHtml(a, it.code)}</div>
+    <div data-crit="${it.code}">${criteriaHtml(it, r)}</div>
     ${tiered ? `<div class="jumlah-row">
       <label>Jumlah ${meta.unit} tersedia</label>
       <input type="number" min="0" max="9" inputmode="numeric" value="${r.jumlah || ''}" data-jumlah="${it.code}">
@@ -676,6 +714,12 @@ function patchItem(code) {
   document.querySelectorAll(attrSel('data-graderow', code)).forEach((el) => { el.innerHTML = gradeRowHtml(it, r) })
   document.querySelectorAll(attrSel('data-status', code)).forEach((el) => { el.innerHTML = statusChip(r) })
   document.querySelectorAll(attrSel('data-autohint', code)).forEach((el) => { el.innerHTML = autoHintHtml(a, code) })
+  document.querySelectorAll(attrSel('data-crit', code)).forEach((el) => {
+    el.querySelectorAll('li').forEach((li) => {
+      const k = li.querySelector('b').textContent
+      li.classList.toggle('on', (k === 'N/A' ? 'X' : k) === r.grade)
+    })
+  })
   document.querySelectorAll(attrSel('data-item', code)).forEach((el) => {
     el.classList.toggle('submitted', !!(r.submittedAt && !r.changedAfterSubmit))
   })
@@ -860,7 +904,7 @@ function validateItem(a, code) {
       const e = evalTera(a)
       if (!e.rows.length) errs.push('Data nozzle belum diisi di form Data SPBU.')
       else if (!e.testedCount) errs.push('Isi hasil tera minimal satu nozzle.')
-      else if (!e.failRows.length && !e.coverageOk) errs.push(`Jumlah nozzle yang diperiksa belum memenuhi target ${e.level === 'excellent' ? '100%' : '50%'} per produk.`)
+      else if (!e.coverageOk && e.autoGrade !== 'F') errs.push(`Jumlah nozzle yang diperiksa belum memenuhi target ${e.level === 'excellent' ? '100%' : '50%'} per produk.`)
     }
     if (code === TENANT_ITEM) {
       const e = evalTenants(a)
@@ -1746,6 +1790,15 @@ function onInput(ev) {
     return
   }
 
+  if (t.dataset.pct) {
+    const code = t.dataset.pct
+    const r = getResult(curAudit(), code)
+    setResult(code, { pct: { ...(r.pct || {}), [t.dataset.pf]: t.value } })
+    applyAutoGrade(code)
+    patchItem(code)
+    return
+  }
+
   if (t.dataset.jumlah) {
     setResult(t.dataset.jumlah, { jumlah: parseInt(t.value, 10) || 0 })
     patchItem(t.dataset.jumlah)
@@ -1775,6 +1828,12 @@ async function init() {
   app.addEventListener('click', onClick)
   app.addEventListener('input', onInput)
   app.addEventListener('change', onChange)
+  app.addEventListener('toggle', (ev) => {
+    const d = ev.target
+    if (d.dataset && d.dataset.critdetails) {
+      if (d.open) critOpenSet.add(d.dataset.critdetails); else critOpenSet.delete(d.dataset.critdetails)
+    }
+  }, true)
   document.getElementById('modalRoot').addEventListener('click', onClick)
   app.addEventListener('submit', (ev) => {
     if (ev.target.id === 'loginForm') { ev.preventDefault(); cloudLogin(ev.target) }

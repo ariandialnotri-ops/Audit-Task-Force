@@ -46,7 +46,8 @@ Audit juga punya `syncedAt` (versi `updatedAt` terakhir yang sudah terkirim ke c
 ## Aturan otomatis v2
 
 - Density: D15 = tabel ASTM 53 (obs, suhu). |D15 audit − D15 pengiriman terakhir| ≤ 0,003 → saran A, selain itu F.
-- Tera 2.2.m: selisih < −60 ml = gagal → F. Semua diperiksa dalam batas dan cakupan per produk terpenuhi (Good ≥ 50% dibulatkan ke atas, Excellent 100%) → A. B/C tetap dipilih manual oleh auditor.
+- Tera 2.2.m: batas **−60 ml/20 L** (ketentuan Pasti Pas, dikonfirmasi Rian; teks judul guideline yang menyebut −100 ml diabaikan). Nilai A/B/C/F dari tabel "Ketentuan nilai" guideline (`teraGradeByTable`: jumlah nozzle dicek vs jumlah di bawah toleransi). Diterapkan bila cakupan per produk terpenuhi (Good ≥ 50%, Excellent 100%), atau langsung F bila sudah pasti F walau semua nozzle dicek.
+- Kalkulator "% sesuai" (`gradeFromPct`) untuk item yang kriteria guideline-nya persentase (A–F: 100/80/60/40/20, A/C/F: 100/60, A/F: 100, A/B/C/F: 100/80/60).
 - Tenant 5.2.f: izin berlaku = `berlakuSampai ≥ tanggalAudit` dan ada foto izin. Semua tenant berlaku → A, ada yang tidak → F.
 - Excellent tambahan wajib ≥1 tenant `internasional` + ≥1 tenant `nasional` berizin berlaku (di `computeAudit`).
 - Nilai otomatis diterapkan saat angka berubah; auditor tetap bisa mengganti nilai (muncul peringatan bila berbeda).
@@ -71,6 +72,10 @@ Audit juga punya `syncedAt` (versi `updatedAt` terakhir yang sudah terkirim ke c
 - **Item Pinalti** (21 item, lihat `PINALTI_META`): jika salah satu bernilai `F`, SPBU otomatis gagal sertifikasi berapa pun TS-nya.
 - **Item bertingkat** (`4.3.f` Fast Track, `5.1.f` Ragam Produk JBU, `5.2.g` Kelengkapan NFR): field `jumlah` — minimal 1 untuk syarat Good, minimal 2 untuk syarat Excellent.
 - Logika lengkap ada di `computeAudit()` dan `computeGroupScore()` di `src/lib/scoring.js`.
+
+## Audit Guideline (kriteria nilai)
+
+`src/data/guideline.js` berisi kriteria tiap nilai dari *Audit Guideline New Pertamina Way 2.0 – 2025 (Basic Operational)* (PDF 85 hal., tidak disimpan di repo), dipetakan ke kode checklist Intertek (penomoran guideline berbeda, mis. APAR = guideline 3.2.a = checklist 3.1.4.a). 83 item checklist terpetakan; 42 item tidak ada di guideline Basic Operational dan tetap memakai skala Excel. Skala semua item terpetakan sudah dicocokkan (test `skala setiap item sesuai Audit Guideline`); satu-satunya koreksi: 3.1.4.r Instalasi listrik A/F → **A–F**. Bobot item tidak berubah (guideline tidak memuat bobot per item).
 
 ## Sumber kebenaran data checklist
 

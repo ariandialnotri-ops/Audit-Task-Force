@@ -94,3 +94,76 @@ test('N/A hanya untuk item berskala /X (sesuai Excel sumber)', async () => {
   assert.equal(scaleLabel(ITEM_BY_CODE['1.2.g']), 'A–F · N/A')
   assert.equal(scaleLabel(ITEM_BY_CODE['3.1.3.a']), 'A/C · N/A')
 })
+
+test('tera: tabel ketentuan nilai guideline (nozzle dicek vs di bawah −60 ml)', async () => {
+  const { teraGradeByTable } = await import('../src/lib/scoring.js')
+  assert.equal(teraGradeByTable(3, 0), 'A')
+  assert.equal(teraGradeByTable(3, 1), 'F')
+  assert.equal(teraGradeByTable(8, 1), 'C')
+  assert.equal(teraGradeByTable(8, 2), 'F')
+  assert.equal(teraGradeByTable(14, 2), 'C')
+  assert.equal(teraGradeByTable(14, 3), 'F')
+  assert.equal(teraGradeByTable(30, 3), 'C')
+  assert.equal(teraGradeByTable(30, 4), 'F')
+  assert.equal(teraGradeByTable(60, 4), 'C')
+  assert.equal(teraGradeByTable(60, 5), 'F')
+  assert.equal(teraGradeByTable(80, 2), 'B')
+  assert.equal(teraGradeByTable(80, 6), 'C')
+  assert.equal(teraGradeByTable(80, 7), 'F')
+})
+
+test('tera: 8 nozzle, 1 di bawah toleransi → C setelah cakupan terpenuhi', () => {
+  const a = baseAudit()
+  a.info.kelasTarget = 'excellent'
+  a.info.nozzles = Array.from({ length: 8 }, (_, i) => ({ id: 'n' + i, nomor: String(i + 1), produk: 'Pertalite' }))
+  a.results[TERA_ITEM].tera = { n0: '-70' }
+  let e = evalTera(a)
+  assert.equal(e.autoGrade, null) // belum lengkap, 1 Red masih bisa C
+  assert.equal(e.provisional, 'F')
+  a.results[TERA_ITEM].tera = Object.fromEntries(a.info.nozzles.map((n, i) => [n.id, i === 0 ? '-70' : '-10']))
+  e = evalTera(a)
+  assert.equal(e.autoGrade, 'C')
+  a.results[TERA_ITEM].tera.n1 = '-61'
+  assert.equal(evalTera(a).autoGrade, 'F')
+})
+
+test('kalkulator persentase sesuai kriteria guideline', async () => {
+  const { gradeFromPct } = await import('../src/lib/scoring.js')
+  assert.equal(gradeFromPct('A-F', 10, 10), 'A')
+  assert.equal(gradeFromPct('A-F', 8, 10), 'B')
+  assert.equal(gradeFromPct('A-F', 7, 10), 'C')
+  assert.equal(gradeFromPct('A-F', 4, 10), 'D')
+  assert.equal(gradeFromPct('A-F', 2, 10), 'E')
+  assert.equal(gradeFromPct('A-F', 1, 10), 'F')
+  assert.equal(gradeFromPct('ACF', 5, 5), 'A')
+  assert.equal(gradeFromPct('ACF', 3, 5), 'C')
+  assert.equal(gradeFromPct('ACF', 2, 5), 'F')
+  assert.equal(gradeFromPct('AF', 9, 10), 'F')
+  assert.equal(gradeFromPct('ABCF', 4, 5), 'B')
+  assert.equal(gradeFromPct('AF', 11, 10), null)
+})
+
+test('skala setiap item sesuai Audit Guideline (item yang ada di guideline)', async () => {
+  const { GUIDELINE } = await import('../src/data/guideline.js')
+  const { ITEM_BY_CODE } = await import('../src/lib/scoring.js')
+  const expand = (s) => {
+    const g = []
+    let x = false
+    for (const p of s.split('/')) {
+      if (p === 'X') { x = true; continue }
+      const r = p.match(/^([A-F])-([A-F])$/)
+      if (r) for (let c = r[1].charCodeAt(0); c <= r[2].charCodeAt(0); c++) g.push(String.fromCharCode(c))
+      else g.push(p)
+    }
+    return { g: g.join(''), x }
+  }
+  assert.equal(Object.keys(GUIDELINE).length, 83)
+  for (const [code, gl] of Object.entries(GUIDELINE)) {
+    const it = ITEM_BY_CODE[code]
+    const e = expand(gl.scale)
+    assert.equal(it.allowed.join(''), e.g, `${code} (guideline ${gl.ref})`)
+    assert.equal(it.allowNA, e.x, `${code} N/A`)
+    for (const k of Object.keys(gl.crit)) assert.ok(k === 'X' ? it.allowNA : it.allowed.includes(k), `${code} kriteria ${k}`)
+  }
+  assert.equal(ITEM_BY_CODE['3.1.4.r'].allowed.join(''), 'ABCDEF')
+})
