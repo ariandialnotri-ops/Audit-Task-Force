@@ -128,13 +128,38 @@ export async function changePassword(oldPassword, newPassword) {
 
 /* ------------------------------ Foto ------------------------------ */
 
+const CLOUD_MAX_W = 1024
+const CLOUD_QUALITY = 0.62
+
+/**
+ * Perkecil foto untuk cloud (±1024 px, ±80–100 KB) agar kuota gratis awet.
+ * Foto asli tetap utuh di perangkat & PDF. Stamp GPS/tanggal ikut karena sudah tercetak di gambar.
+ */
+async function compressForCloud(blob) {
+  try {
+    const bmp = await createImageBitmap(blob)
+    if (bmp.width <= CLOUD_MAX_W && blob.size <= 160 * 1024) { bmp.close && bmp.close(); return blob }
+    const scale = Math.min(1, CLOUD_MAX_W / bmp.width)
+    const c = document.createElement('canvas')
+    c.width = Math.round(bmp.width * scale)
+    c.height = Math.round(bmp.height * scale)
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height)
+    bmp.close && bmp.close()
+    const out = await new Promise((res) => c.toBlob(res, 'image/jpeg', CLOUD_QUALITY))
+    return out && out.size < blob.size ? out : blob
+  } catch {
+    return blob
+  }
+}
+
 async function uploadPendingPhotos(audit) {
   let uploaded = 0
   for (const list of photoLists(audit)) {
     for (const p of list) {
       if (!p || p.path) continue
-      const blob = await photoBlob(p)
-      if (!blob) continue
+      const original = await photoBlob(p)
+      if (!original) continue
+      const blob = await compressForCloud(original)
       if (!p.id) p.id = newPhotoId()
       const { path } = await api('PUT', `/api/photos/${encodeURIComponent(audit.id)}/${encodeURIComponent(p.id)}`, { raw: blob })
       p.path = path
@@ -208,6 +233,10 @@ export async function deleteRemote(id) {
 }
 
 /* ------------------------------ Anggota ------------------------------ */
+
+export async function usage() {
+  return api('GET', '/api/usage')
+}
 
 export async function listMembers() {
   return api('GET', '/api/members')

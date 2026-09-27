@@ -31,7 +31,7 @@ const cloud = {
   status: 'idle', // idle | syncing | error | offline
   message: '', lastSync: null, needsSetup: false,
   remote: null, remoteLoading: false, remoteError: '',
-  members: null, remoteFilter: '',
+  members: null, remoteFilter: '', usage: null,
 }
 
 const contentEl = () => document.getElementById('content')
@@ -1449,7 +1449,10 @@ async function loadRemote() {
   refreshCloudUi()
   try {
     cloud.remote = await cloud.mod.listRemote()
-    if (cloud.role === 'admin') cloud.members = await cloud.mod.listMembers()
+    if (cloud.role === 'admin') {
+      cloud.members = await cloud.mod.listMembers()
+      cloud.usage = await cloud.mod.usage().catch(() => null)
+    }
   } catch (e) {
     cloud.remoteError = e.message
   }
@@ -1582,6 +1585,19 @@ function viewCloud() {
   }
   if (!cloud.remote && !cloud.remoteLoading && !cloud.remoteError && navigator.onLine) setTimeout(loadRemote, 0)
   const pend = pendingCount()
+  const u = cloud.usage
+  const usageHtml = cloud.role === 'admin' && u ? (() => {
+    const pct = Math.min(100, (u.photos.bytes / u.limitBytes) * 100)
+    const mb = (b) => (b / 1024 / 1024).toLocaleString('id-ID', { maximumFractionDigits: 1 })
+    return `<div class="section-title">Kapasitas Cloud (admin)</div>
+    <div class="card">
+      <div class="link-row"><span class="l">Penyimpanan foto</span><span class="v">${u.storage === 'r2' ? 'R2' : 'D1 (tanpa R2)'}</span></div>
+      <div class="link-row"><span class="l">Foto tersimpan</span><span class="v">${u.photos.count} · ${mb(u.photos.bytes)} MB</span></div>
+      <div class="link-row"><span class="l">Audit · Anggota</span><span class="v">${u.audits} · ${u.users}</span></div>
+      <div class="progress-track" style="margin-top:8px"><div class="progress-fill" style="width:${pct}%;${pct > 80 ? 'background:var(--status-warning)' : ''}"></div></div>
+      <p class="hint" style="margin-top:6px">${pct.toFixed(1)}% dari kuota gratis ±${u.storage === 'r2' ? '10 GB' : '500 MB'}${pct > 80 ? ' — hampir penuh: hapus audit lama yang sudah selesai (sudah ada di PDF) atau aktifkan R2.' : ''}</p>
+    </div>`
+  })() : ''
   const membersHtml = cloud.role === 'admin' ? `
     <div class="section-title">Anggota (admin)</div>
     <div class="card">
@@ -1623,6 +1639,7 @@ function viewCloud() {
     <div class="field" style="margin-bottom:8px;"><input id="remoteFilter" placeholder="Filter SPBU / kota / auditor" value="${esc(cloud.remoteFilter)}"></div>
     ${cloud.remoteLoading ? '<p class="hint">Memuat…</p>' : cloud.remoteError ? `<p class="hint" style="color:var(--status-warning)">${esc(cloud.remoteError)}</p>` : `<div id="remoteList">${remoteListHtml()}</div>`}
   </div>
+  ${usageHtml}
   ${membersHtml}`
 }
 

@@ -8,7 +8,7 @@ Web app statis berbasis **Vite + vanilla JS** (tanpa framework), siap deploy di 
 
 ## Sinkronisasi cloud (Cloudflare)
 
-- Backend sendiri di akun Cloudflare: **Worker** `worker/` (API + login), **D1** (data audit & akun), **R2** (foto). Terpisah total dari Supabase PANTAS.
+- Backend sendiri di akun Cloudflare: **Worker** `worker/` (API + login), **D1** (data audit, akun, dan foto — tanpa kartu), **R2** opsional untuk foto bila ada metode pembayaran. Foto dikecilkan ke ±1024 px sebelum upload. Terpisah total dari Supabase PANTAS.
 - Login email + password (hash PBKDF2, token sesi 30 hari, kunci 15 menit setelah 5× salah). Peran: admin / auditor. Admin pertama dibuat dengan kode `SETUP_TOKEN`, anggota lain ditambah admin di tab **Cloud → Anggota**.
 - Tab **Cloud**: hubungkan API, login, status sinkron, **Rekap Audit Semua SPBU**, unduh audit lengkap ke perangkat, ganti password.
 - Alamat API: env build `VITE_AUDIT_API_URL` (Vercel) atau diisi sekali di tab Cloud.

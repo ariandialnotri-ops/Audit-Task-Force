@@ -3,7 +3,8 @@
  *
  * Binding yang dibutuhkan (lihat wrangler.toml / Dashboard → Worker → Settings → Bindings):
  *   DB           : D1 database  (skema: worker/schema.sql)
- *   PHOTOS       : R2 bucket    (foto bukti, key: <auditId>/<photoId>.jpg)
+ *   PHOTOS       : R2 bucket    (OPSIONAL — foto bukti, key: <auditId>/<photoId>.jpg).
+ *                  Bila tidak dipasang, foto disimpan di tabel `photos` D1 (tanpa kartu/billing).
  *   SETUP_TOKEN  : secret       (kode sekali pakai untuk membuat admin pertama)
  *   ALLOWED_ORIGIN (opsional)   : origin aplikasi, mis. https://audit-task-force.vercel.app ("*" bila kosong)
  *
@@ -230,18 +231,67 @@ async function deleteAudit(env, ctx, user, id) {
     throw new HttpError(403, 'Hanya admin atau pembuat (status draft) yang dapat menghapus audit ini')
   }
   await env.DB.prepare('DELETE FROM audits WHERE id = ?').bind(id).run()
-  ctx.waitUntil((async () => {
-    let cursor
-    do {
-      const list = await env.PHOTOS.list({ prefix: `${id}/`, cursor })
-      if (list.objects.length) await env.PHOTOS.delete(list.objects.map((o) => o.key))
-      cursor = list.truncated ? list.cursor : undefined
-    } while (cursor)
-  })())
+  ctx.waitUntil(photoStore(env).deleteAudit(id))
   return { ok: true }
 }
 
 /* ------------------------------ photos ------------------------------ */
+
+/**
+ * Penyimpanan foto: R2 bila binding PHOTOS dipasang, selain itu tabel `photos` di D1.
+ * D1 gratis ±500 MB per database — foto dikecilkan klien (±1024 px) sebelum upload.
+ */
+function photoStore(env) {
+  if (env.PHOTOS) {
+    return {
+      kind: 'r2',
+      async put(key, auditId, buf) {
+        await env.PHOTOS.put(key, buf, { httpMetadata: { contentType: 'image/jpeg' } })
+      },
+      async get(key) {
+        const obj = await env.PHOTOS.get(key)
+        return obj ? obj.body : null
+      },
+      async deleteAudit(auditId) {
+        let cursor
+        do {
+          const list = await env.PHOTOS.list({ prefix: `${auditId}/`, cursor })
+          if (list.objects.length) await env.PHOTOS.delete(list.objects.map((o) => o.key))
+          cursor = list.truncated ? list.cursor : undefined
+        } while (cursor)
+      },
+      async usage() {
+        let count = 0, bytes = 0, cursor
+        do {
+          const list = await env.PHOTOS.list({ cursor })
+          list.objects.forEach((o) => { count++; bytes += o.size })
+          cursor = list.truncated ? list.cursor : undefined
+        } while (cursor)
+        return { count, bytes }
+      },
+    }
+  }
+  return {
+    kind: 'd1',
+    async put(key, auditId, buf) {
+      await env.DB.prepare('INSERT OR REPLACE INTO photos (key, audit_id, data, size, created_at) VALUES (?, ?, ?, ?, ?)')
+        .bind(key, auditId, buf, buf.byteLength, Date.now()).run()
+    },
+    async get(key) {
+      const r = await env.DB.prepare('SELECT data FROM photos WHERE key = ?').bind(key).first()
+      if (!r) return null
+      const d = r.data
+      return d instanceof ArrayBuffer ? d : Uint8Array.from(d).buffer
+    },
+    async deleteAudit(auditId) {
+      await env.DB.prepare('DELETE FROM photos WHERE audit_id = ?').bind(auditId).run()
+    },
+    async usage() {
+      const r = await env.DB.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS b FROM photos').first()
+      return { count: r.n, bytes: r.b }
+    },
+  }
+}
 
 async function putPhoto(req, env, auditId, photoId) {
   const len = Number(req.headers.get('Content-Length') || 0)
@@ -250,15 +300,26 @@ async function putPhoto(req, env, auditId, photoId) {
   if (buf.byteLength > MAX_PHOTO_BYTES) throw new HttpError(413, 'Foto terlalu besar (maks 5 MB)')
   const head = new Uint8Array(buf.slice(0, 3))
   if (!(head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff)) throw new HttpError(415, 'Hanya foto JPEG')
+  const store = photoStore(env)
+  if (store.kind === 'd1' && buf.byteLength > 1_500_000) throw new HttpError(413, 'Foto terlalu besar untuk penyimpanan D1 (maks 1,5 MB)')
   const key = `${auditId}/${photoId}.jpg`
-  await env.PHOTOS.put(key, buf, { httpMetadata: { contentType: 'image/jpeg' } })
+  await store.put(key, auditId, buf)
   return { path: key }
 }
 
 async function getPhoto(env, auditId, photoId) {
-  const obj = await env.PHOTOS.get(`${auditId}/${photoId}.jpg`)
-  if (!obj) throw new HttpError(404, 'Foto tidak ditemukan')
-  return new Response(obj.body, { headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400', ...cors(env) } })
+  const body = await photoStore(env).get(`${auditId}/${photoId}.jpg`)
+  if (!body) throw new HttpError(404, 'Foto tidak ditemukan')
+  return new Response(body, { headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400', ...cors(env) } })
+}
+
+async function usage(env) {
+  const store = photoStore(env)
+  const photos = await store.usage()
+  const audits = await env.DB.prepare('SELECT COUNT(*) AS n FROM audits').first('n')
+  const users = await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first('n')
+  // Batas kuota gratis (perkiraan): D1 ±500 MB per database, R2 ±10 GB
+  return { storage: store.kind, photos, audits, users, limitBytes: store.kind === 'r2' ? 10 * 1024 ** 3 : 500 * 1024 ** 2 }
 }
 
 /* ------------------------------ members ------------------------------ */
@@ -346,6 +407,7 @@ async function route(req, env, ctx) {
     if (m === 'GET') return getPhoto(env, auditId, photoId)
   }
 
+  if (p === '/api/usage' && m === 'GET') { requireAdmin(user); return json(env, await usage(env)) }
   if (p === '/api/members' && m === 'GET') { requireAdmin(user); return json(env, await listMembers(env)) }
   if (p === '/api/members' && m === 'POST') { requireAdmin(user); return json(env, await upsertMember(req, env)) }
   if ((x = p.match(/^\/api\/members\/([^/]+)$/)) && m === 'DELETE') { requireAdmin(user); return json(env, await deleteMember(env, user, decodeURIComponent(x[1]))) }

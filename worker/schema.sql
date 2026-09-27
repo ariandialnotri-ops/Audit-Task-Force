@@ -38,3 +38,13 @@ CREATE TABLE IF NOT EXISTS audits (
 );
 CREATE INDEX IF NOT EXISTS audits_updated_idx ON audits (updated_at DESC);
 CREATE INDEX IF NOT EXISTS audits_spbu_idx ON audits (nomor_spbu);
+
+-- Foto bukti bila R2 tidak dipakai (tanpa kartu/billing). Bila binding R2 PHOTOS dipasang, tabel ini tidak dipakai.
+CREATE TABLE IF NOT EXISTS photos (
+  key TEXT PRIMARY KEY,
+  audit_id TEXT NOT NULL,
+  data BLOB NOT NULL,
+  size INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS photos_audit_idx ON photos (audit_id);
