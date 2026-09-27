@@ -7,7 +7,7 @@ compatibility_date = "2026-09-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "audit-task-force"
-database_id = "GANTI-DENGAN-ID-D1"
+database_id = "505140b7-6a01-4738-ad1d-9ebd73d35b27"
 
 # Buat dulu:  npx wrangler r2 bucket create audit-foto
 [[r2_buckets]]
