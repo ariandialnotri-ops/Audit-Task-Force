@@ -1,0 +1,10 @@
+// Konfigurasi Cloudflare untuk APLIKASI WEB (file statis hasil `npm run build`).
+// Nama sengaja berbeda dari Worker API (`audit-task-force`, folder worker/) agar tidak saling menimpa.
+{
+  "name": "audit-task-force-app",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}

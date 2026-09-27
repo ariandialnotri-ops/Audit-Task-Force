@@ -19,7 +19,7 @@ Aplikasi audit SPBU Pertamina Way (standar "Pasti Pas"). Auditor mengisi checkli
 - `src/lib/cloud.js` — klien API cloud (dimuat dinamis): token Bearer di localStorage, push audit + upload foto, rekap, pull, anggota. Alamat API: `VITE_AUDIT_API_URL` → isian tab Cloud → default `https://audit-task-force.ariandialnotri.workers.dev`.
 - `worker/` — backend Cloudflare Worker (`src/index.js`), skema D1 (`schema.sql`), `wrangler.toml`, uji API (`npm test` terhadap `wrangler dev` lokal). Binding: `DB` (D1), `PHOTOS` (R2 **opsional**, key `<auditId>/<photoId>.jpg`; tanpa binding ini foto disimpan di tabel D1 `photos` — Rian tidak punya kartu untuk aktivasi R2), secret `SETUP_TOKEN`, var `ALLOWED_ORIGIN`. Klien mengecilkan foto ke 1024 px/q0.62 sebelum upload; admin melihat pemakaian via `GET /api/usage`. Deploy: `DEPLOY-CLOUDFLARE.md`. Sengaja terpisah dari Supabase PANTAS (permintaan Rian).
 - `src/lib/camera.js` — kamera getUserMedia layar penuh + watchPosition GPS + stamp teks di foto. Tidak ada input file/galeri.
-- Deploy: Vercel (`vercel.json`, framework vite, output `dist`).
+- Deploy aplikasi web: Cloudflare Workers static assets (`wrangler.jsonc` di root, nama `audit-task-force-app`, header di `public/_headers`) atau Vercel (`vercel.json`). Jangan beri nama `audit-task-force` — itu Worker API.
 
 ## Model data
 
