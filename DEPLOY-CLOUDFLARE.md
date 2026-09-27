@@ -66,9 +66,9 @@ npm run deploy
 ## Aplikasi web di Cloudflare (tanpa Vercel)
 
 *Workers & Pages* → **Create** → *Import a repository* → pilih `Audit-Task-Force` → **Next**:
-- **Project name: `audit-task-force-app`** — WAJIB berbeda dari Worker API `audit-task-force` (nama sama = API tertimpa). Nama ini juga yang tertulis di `wrangler.jsonc` di root repo.
+- **Project name: `task-force-audit-app`** — WAJIB berbeda dari Worker API `audit-task-force` (nama sama = API tertimpa). Nama ini juga yang tertulis di `wrangler.jsonc` di root repo.
 - Build command: `npm run build` · Deploy command: `npx wrangler deploy` · Path: `/` (root)
-- Hasil: `https://audit-task-force-app.<akun>.workers.dev`. Header kamera/GPS diatur di `public/_headers`.
+- Hasil: `https://task-force-audit-app.<akun>.workers.dev`. Header kamera/GPS diatur di `public/_headers`.
 
 ## Sambungkan aplikasi
 
