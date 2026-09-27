@@ -4,9 +4,11 @@ Cloud aplikasi Audit Pertamina Way berjalan di akun Cloudflare Anda sendiri, ter
 
 | Komponen | Layanan Cloudflare | Nama |
 |---|---|---|
-| API (login, data audit, anggota) | Worker | `audit-pertamina-way-api` |
+| API (login, data audit, anggota) | Worker | `audit-task-force` |
 | Database audit & akun | D1 | `audit-pertamina-way` |
 | Foto bukti | R2 | `audit-foto` |
+
+Nama Worker, database, dan bucket boleh diganti (mis. Worker bernama `audit-task-force`); yang **wajib persis** hanya nama variabel binding: `DB`, `PHOTOS`, dan secret `SETUP_TOKEN`.
 
 Aplikasi web (Vercel) cukup diberi alamat API Worker. Semua langkah bisa lewat **Dashboard** (tanpa install apa pun) atau lewat **CLI**.
 
@@ -23,7 +25,7 @@ Aplikasi web (Vercel) cukup diberi alamat API Worker. Semua langkah bisa lewat *
    (Saat pertama mengaktifkan R2, Cloudflare mungkin meminta data pembayaran walaupun pemakaian masih dalam kuota gratis.)
 
 3. **Buat Worker**
-   Dashboard → *Workers & Pages* → **Create** → *Create Worker* → nama `audit-pertamina-way-api` → **Deploy** → **Edit code**.
+   Dashboard → *Workers & Pages* → **Create** → *Create Worker* → nama `audit-task-force` → **Deploy** → **Edit code**.
    Hapus kode contoh, tempel seluruh isi [`worker/src/index.js`](worker/src/index.js) → **Deploy**.
 
 4. **Hubungkan database, bucket & secret**
@@ -35,7 +37,7 @@ Aplikasi web (Vercel) cukup diberi alamat API Worker. Semua langkah bisa lewat *
    - Type **Secret**, name `SETUP_TOKEN`, value: kode rahasia buatan Anda (mis. 20 karakter acak). Dipakai sekali untuk membuat admin pertama.
    - (Disarankan) Type **Text**, name `ALLOWED_ORIGIN`, value: URL aplikasi, mis. `https://audit-task-force.vercel.app`.
 
-5. **Catat alamat Worker**, mis. `https://audit-pertamina-way-api.<akun-anda>.workers.dev`.
+5. **Catat alamat Worker**, mis. `https://audit-task-force.<akun-anda>.workers.dev`.
    Cek: buka `<alamat>/api/health` → harus tampil `{"ok":true,"needsSetup":true}`.
 
 ## Cara B — lewat CLI (wrangler)

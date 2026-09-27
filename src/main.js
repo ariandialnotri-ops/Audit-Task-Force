@@ -1533,7 +1533,7 @@ function viewCloud() {
     return `
     <div class="card">
       <b>Hubungkan ke Cloud</b>
-      <p class="hint">Isi alamat API Cloudflare Worker milik tim audit (didapat saat deploy, mis. <code>https://audit-pertamina-way-api.nama-anda.workers.dev</code>). Cukup sekali per perangkat. Tanpa ini aplikasi tetap bisa dipakai penuh, data tersimpan di HP.</p>
+      <p class="hint">Isi alamat API Cloudflare Worker milik tim audit (didapat saat deploy, mis. <code>https://audit-task-force.nama-anda.workers.dev</code>). Cukup sekali per perangkat. Tanpa ini aplikasi tetap bisa dipakai penuh, data tersimpan di HP.</p>
       <form id="apiForm">
         <div class="field"><label>Alamat API</label><input name="apiUrl" type="url" inputmode="url" placeholder="https://…workers.dev" required></div>
         <button class="btn-primary" type="submit">Simpan &amp; Hubungkan</button>
