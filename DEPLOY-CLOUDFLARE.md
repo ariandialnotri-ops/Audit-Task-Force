@@ -44,7 +44,7 @@ Aplikasi web (Vercel) cukup diberi alamat API Worker. Semua langkah bisa lewat *
    - Type **Secret**, name `SETUP_TOKEN`, value: kode rahasia buatan Anda (mis. 20 karakter acak). Dipakai sekali untuk membuat admin pertama.
    - (Disarankan) Type **Text**, name `ALLOWED_ORIGIN`, value: URL aplikasi, mis. `https://audit-task-force.vercel.app`.
 
-5. **Catat alamat Worker**, mis. `https://audit-task-force.<akun-anda>.workers.dev`.
+5. **Alamat Worker produksi:** `https://audit-task-force.ariandialnotri.workers.dev` (sudah menjadi default di aplikasi, `src/lib/cloud.js`).
    Cek: buka `<alamat>/api/health` → harus tampil `{"ok":true,"needsSetup":true}`.
 
 ## Cara B — lewat CLI (wrangler)

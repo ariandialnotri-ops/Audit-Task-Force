@@ -6,8 +6,8 @@
  * Business Head / admin dapat melihat rekap semua audit dan mengunduh audit
  * lengkap ke perangkatnya.
  *
- * Alamat API diambil dari env build `VITE_AUDIT_API_URL`, atau diisi sekali di
- * tab Cloud (disimpan di perangkat).
+ * Alamat API: env build `VITE_AUDIT_API_URL` → isian tab Cloud (per perangkat) →
+ * default Worker produksi `audit-task-force.ariandialnotri.workers.dev`.
  */
 import { photoLists, photoBlob, newPhotoId, thumbFromBlob } from './photos.js'
 import { putPhoto } from './storage.js'
@@ -19,8 +19,11 @@ const LS_USER = 'audit_api_user'
 function lsGet(k) { try { return localStorage.getItem(k) } catch { return null } }
 function lsSet(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v) } catch { /* ignore */ } }
 
+/** Worker produksi tim audit (Cloudflare). Bisa ditimpa env build atau isian tab Cloud. */
+const DEFAULT_API = 'https://audit-task-force.ariandialnotri.workers.dev'
+
 export function apiBase() {
-  return (import.meta.env.VITE_AUDIT_API_URL || lsGet(LS_URL) || '').replace(/\/+$/, '')
+  return (import.meta.env.VITE_AUDIT_API_URL || lsGet(LS_URL) || DEFAULT_API || '').replace(/\/+$/, '')
 }
 export function apiFromEnv() {
   return !!import.meta.env.VITE_AUDIT_API_URL
