@@ -221,3 +221,52 @@ export function captureStampedPhoto({ label = '', spbu = '', auditor = '' } = {}
     })
   })
 }
+
+/**
+ * SEMENTARA: pilih foto dari galeri (tanpa stamp timestamp / kode verifikasi).
+ * Harus dipanggil langsung dari handler klik (aturan browser untuk membuka pemilih file).
+ * Resolve dengan array `{blob, thumb, ts, sha256, auditor, source: 'gallery', fileDate}`
+ * (kosong bila dibatalkan). Foto dikecilkan ke maks 1280 px, JPEG q0.72.
+ */
+export function pickGalleryPhotos({ auditor = '', multiple = true } = {}) {
+  return new Promise((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.multiple = multiple
+    input.style.display = 'none'
+    document.body.appendChild(input)
+    let settled = false
+    const finish = (v) => { if (settled) return; settled = true; input.remove(); resolve(v) }
+    input.addEventListener('cancel', () => finish([]))
+    input.addEventListener('change', async () => {
+      const files = [...(input.files || [])].filter((f) => f.type.startsWith('image/'))
+      const out = []
+      for (const f of files) {
+        try { out.push(await processGalleryFile(f, auditor)) } catch (e) { console.warn('Foto galeri gagal diproses', e) }
+      }
+      finish(out)
+    })
+    input.click()
+  })
+}
+
+async function processGalleryFile(file, auditor) {
+  const url = URL.createObjectURL(file)
+  try {
+    const img = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('Format gambar tidak didukung')); im.src = url })
+    const scale = Math.min(1, 1280 / Math.max(img.naturalWidth, img.naturalHeight))
+    const w = Math.round(img.naturalWidth * scale)
+    const h = Math.round(img.naturalHeight * scale)
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+    const thumb = canvasThumb(canvas, w, h)
+    const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.72))
+    if (!blob) throw new Error('Gagal menyimpan foto')
+    return { blob, thumb, ts: Date.now(), fileDate: file.lastModified || null, sha256: await blobSha256(blob), auditor, source: 'gallery' }
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}

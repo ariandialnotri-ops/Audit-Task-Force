@@ -11,7 +11,7 @@ import {
 import { DENSITY_TOLERANCE, METHOD_LABEL } from './lib/density.js'
 import { formatDensity, formatSigned, parseAngka } from './lib/format.js'
 import { loadAll, scheduleSave, flushSave, flushAll, deleteAudit } from './lib/storage.js'
-import { captureStampedPhoto, formatStampTime, verifyPhoto } from './lib/camera.js'
+import { captureStampedPhoto, pickGalleryPhotos, formatStampTime, verifyPhoto } from './lib/camera.js'
 import { thumbSrc, fullUrl, storeNewPhoto, removePhotoFiles, migrateAuditPhotos, photoLists, photoBlob } from './lib/photos.js'
 import { buildReport, fmtPct, fmtSkor } from './lib/report.js'
 import { LOGO_MARK, LOGO_FULL, APP_NAME } from './assets/logo-mark.js'
@@ -167,7 +167,7 @@ function flashSaved() {
   if (!el) return
   el.textContent = 'Menyimpan…'
   clearTimeout(flashSaved._t)
-  flashSaved._t = setTimeout(() => { el.textContent = '✓ Tersimpan otomatis' }, 600)
+  flashSaved._t = setTimeout(() => { el.textContent = '✓ tersimpan' }, 600)
 }
 
 function showModal(html) {
@@ -185,6 +185,7 @@ const iconInfo = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 const iconCamera = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8a2 2 0 0 1 2-2h1.2a1 1 0 0 0 .83-.45L9 4h6l.97 1.55a1 1 0 0 0 .83.45H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8z"/><circle cx="12" cy="13" r="3.2"/></svg>`
 const iconSearch = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>`
 const iconUser = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>`
+const iconGallery = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5-8 8"/></svg>`
 const iconCloud = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.1 9.2 4.5 4.5 0 0 0 7 18z"/></svg>`
 
 /* =========================================================
@@ -635,18 +636,17 @@ function teraBlock(a) {
     <div class="calc-head">Tera Bejana Ukur 20 L per Nozzle <span class="mini-pill">batas ${TERA_LIMIT_ML} ml</span></div>
     <div class="hint">Pilih mode <b>P</b> (Preset) atau <b>M</b> (Manual) lalu isi selisih volume (ml) nozzle yang diperiksa: negatif = kurang, positif = lebih. Kurang dari ${TERA_LIMIT_ML} ml = di bawah toleransi (Red). Kosongkan nozzle yang tidak diperiksa. Nilai A/B/C/F mengikuti tabel ketentuan guideline (jumlah nozzle dicek vs jumlah Red).</div>
     ${!e.rows.length ? `<div class="res-pill warn" style="margin:8px 0">Data nozzle belum diisi.</div><button class="btn-ghost" data-back="form">Isi Data Nozzle</button>` : `
-    <table class="tera-table">
-      <tr><th>Nozzle</th><th>Produk</th><th>Mode</th><th>Selisih (ml)</th><th></th></tr>
+    <div class="table-x"><table class="tera-table">
+      <tr><th>Nozzle</th><th>Mode</th><th>Selisih (ml)</th><th></th></tr>
       ${e.rows.map((row) => `<tr>
-        <td class="mono">${esc(row.nomor)}</td>
-        <td>${esc(row.produk)}</td>
+        <td class="tz-noz"><b class="mono">${esc(row.nomor)}</b><small>${esc(row.produk)}</small></td>
         <td><div class="pm-toggle" role="group" aria-label="Mode tera nozzle ${esc(row.nomor)}">
           <button class="pm ${row.mode === 'P' ? 'on' : ''}" data-teramode="${row.id}|P" title="Preset">P</button><button class="pm ${row.mode === 'M' ? 'on' : ''}" data-teramode="${row.id}|M" title="Manual">M</button>
         </div></td>
         <td><input data-tera="${row.id}" inputmode="numeric" value="${esc(tera[row.id])}" placeholder="—"></td>
         <td data-terastatus="${row.id}">${teraStatusHtml(row)}</td>
       </tr>`).join('')}
-    </table>`}
+    </table></div>`}
     <div class="calc-out" data-calcout="${TERA_ITEM}">${teraOutHtml(a)}</div>
   </div>`
 }
@@ -674,7 +674,7 @@ function tenantOutHtml(a) {
 function thumbsHtml(photos, rmAttr, viewKey, locked = false) {
   if (!photos || !photos.length) return ''
   return `<div class="photo-strip">${photos.map((p, idx) => `
-    <div class="photo-thumb"><img src="${thumbSrc(p)}" alt="Foto ${idx + 1}" loading="lazy" data-viewphoto="${viewKey}|${idx}">${locked ? '' : `<button class="rm" ${rmAttr}="${idx}" aria-label="Hapus foto">&times;</button>`}</div>`).join('')}</div>`
+    <div class="photo-thumb"><img src="${thumbSrc(p)}" alt="Foto ${idx + 1}" loading="lazy" data-viewphoto="${viewKey}|${idx}">${p && p.source === 'gallery' ? '<span class="src-tag">GALERI</span>' : ''}${locked ? '' : `<button class="rm" ${rmAttr}="${idx}" aria-label="Hapus foto">&times;</button>`}</div>`).join('')}</div>`
 }
 
 function tenantBlock(a) {
@@ -700,11 +700,11 @@ function tenantBlock(a) {
         </div>
         <div class="tenant-photos">
           <div>
-            <button class="photo-btn" data-tphoto="${t.id}|fotoTenant">${iconCamera} Foto Tenant (${(t.fotoTenant || []).length})</button>
+            <div class="photo-row"><button class="photo-btn" data-tphoto="${t.id}|fotoTenant">${iconCamera} Foto Tenant (${(t.fotoTenant || []).length})</button><button class="gallery-btn" data-gallery="tenant|${t.id}|fotoTenant">${iconGallery} Galeri</button></div>
             ${thumbsHtml(t.fotoTenant, `data-rmtphoto="${t.id}|fotoTenant" data-idx`, `tenant|${t.id}|fotoTenant`, tenantLocked(a))}
           </div>
           <div>
-            <button class="photo-btn" data-tphoto="${t.id}|fotoIzin">${iconCamera} Foto Izin Prinsip (${(t.fotoIzin || []).length})</button>
+            <div class="photo-row"><button class="photo-btn" data-tphoto="${t.id}|fotoIzin">${iconCamera} Foto Izin Prinsip (${(t.fotoIzin || []).length})</button><button class="gallery-btn" data-gallery="tenant|${t.id}|fotoIzin">${iconGallery} Galeri</button></div>
             ${thumbsHtml(t.fotoIzin, `data-rmtphoto="${t.id}|fotoIzin" data-idx`, `tenant|${t.id}|fotoIzin`, tenantLocked(a))}
           </div>
         </div>
@@ -791,6 +791,7 @@ function itemCardHtml(a, it, opts = {}) {
     <div data-crit="${it.code}">${criteriaHtml(it, r)}</div>
     <div class="item-toolrow">
       <button class="photo-btn" data-photo="${it.code}" ${locked ? 'disabled' : ''}>${iconCamera} Foto (${(r.photos || []).length})</button>
+      <button class="gallery-btn" data-gallery="item|${it.code}" ${locked ? 'disabled' : ''} aria-label="Upload dari galeri">${iconGallery} Galeri</button>
       <button class="note-toggle" data-notetoggle="${it.code}" ${locked ? 'disabled' : ''}>${noteOpenSet.has(it.code) || r.note ? 'Sembunyikan catatan' : '+ Catatan'}</button>
       ${locked
         ? `<button class="submit-btn edit" data-edit="${it.code}">✎ Edit</button>`
@@ -887,9 +888,8 @@ function progressHtml() {
   const comp = computeAudit(a)
   const pct = comp.totalItems ? (comp.totalSubmitted / comp.totalItems * 100) : 0
   return `
-    <div class="row"><span>Item tersubmit <span id="saveState" class="save-state">✓ Tersimpan otomatis</span></span><b>${comp.totalSubmitted}/${comp.totalItems} (${pct.toFixed(0)}%)</b></div>
-    <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
-    <div class="row" style="margin-top:6px;margin-bottom:0;"><span>Dinilai ${comp.totalGraded} &middot; Estimasi TS</span><b>${comp.ts.toFixed(2)} &middot; ${clsLabel(comp.classification)}</b></div>`
+    <div class="pg-row"><span><b>${comp.totalSubmitted}/${comp.totalItems}</b> tersubmit <span id="saveState" class="save-state">✓ tersimpan</span></span><span>TS <b>${comp.ts.toFixed(2)}</b> &middot; ${clsLabel(comp.classification)}</span></div>
+    <div class="progress-track slim"><div class="progress-fill" style="width:${pct}%"></div></div>`
 }
 
 function pinaltiStats(a, codes) {
@@ -1004,9 +1004,8 @@ function viewChecklist() {
     ${iconSearch}
     <input id="searchInput" type="search" autocomplete="off" placeholder="Cari item… cth. APAR, toilet, density" value="${esc(searchQuery)}">
     ${searchQuery ? `<button class="search-clear" data-action="clearsearch" aria-label="Hapus pencarian">&times;</button>` : ''}
-  </div></div>
+  </div><div class="top-progress" id="progressBox">${progressHtml()}</div></div>
   <div id="checkBody">${checkBodyHtml()}</div>
-  <div class="sticky-progress" id="progressBox">${progressHtml()}</div>
   <div id="reportFab">${reportFabHtml()}</div>`
 }
 
@@ -1264,8 +1263,10 @@ async function openPhotoViewer(key) {
     <img class="viewer-img" src="${thumbSrc(photo)}" alt="${esc(caption)}">
     <div class="viewer-meta">
       <b>${esc(caption)}</b>
-      <span>${photo.ts ? esc(formatStampTime(photo.ts)) : ''}${photo.auditor ? ' · ' + esc(photo.auditor) : ''}</span>
-      <span>Kode verifikasi: <b class="mono">${esc(photo.code || '—')}</b> <span class="verify-state" data-verify>memeriksa…</span></span>
+      <span>${photo.source === 'gallery' ? 'Diunggah ' : ''}${photo.ts ? esc(formatStampTime(photo.ts)) : ''}${photo.auditor ? ' · ' + esc(photo.auditor) : ''}</span>
+      ${photo.source === 'gallery'
+        ? `<span>Dari galeri (tanpa timestamp kamera)${photo.fileDate ? ' · file ' + esc(formatStampTime(photo.fileDate)) : ''} <span class="verify-state" data-verify>memeriksa…</span></span>`
+        : `<span>Kode verifikasi: <b class="mono">${esc(photo.code || '—')}</b> <span class="verify-state" data-verify>memeriksa…</span></span>`}
     </div>
   </div>`
   const img = root.querySelector('.viewer-img')
@@ -1321,7 +1322,7 @@ function viewReport() {
   const photoHtml = R.photos.length ? `
     <div class="section-title">Dokumentasi Foto (${R.photos.length})</div>
     <div class="card"><div class="report-photo-grid">
-      ${R.photos.map(({ photo: p, caption }) => `<div data-viewphoto="id|${esc(p.id || '')}"><img src="${thumbSrc(p)}" data-full="${esc(p.id || '')}" alt=""><div class="cap">${esc(caption)}${p && p.ts ? `<br>${esc(formatStampTime(p.ts))}` : ''}${p && p.code ? `<br>Kode ${esc(p.code)}` : ''}</div></div>`).join('')}
+      ${R.photos.map(({ photo: p, caption }) => `<div data-viewphoto="id|${esc(p.id || '')}"><img src="${thumbSrc(p)}" data-full="${esc(p.id || '')}" alt=""><div class="cap">${esc(caption)}${p && p.source === 'gallery' ? '<br>Galeri' : `${p && p.ts ? `<br>${esc(formatStampTime(p.ts))}` : ''}${p && p.code ? `<br>Kode ${esc(p.code)}` : ''}`}</div></div>`).join('')}
     </div></div>` : ''
 
   return `
@@ -2102,6 +2103,34 @@ function onClick(ev) {
     if (isLocked(code)) return
     if (noteOpenSet.has(code)) noteOpenSet.delete(code); else noteOpenSet.add(code)
     render()
+    return
+  }
+
+  const galBtn = t.closest('[data-gallery]')
+  if (galBtn) {
+    const parts = galBtn.dataset.gallery.split('|')
+    const a = curAudit()
+    if (parts[0] === 'item' && isLocked(parts[1])) return
+    if (parts[0] === 'tenant' && tenantLocked(a)) return
+    const auditor = currentUserName() || (a.info.auditors || []).find((x) => x) || ''
+    // pemilih file harus dibuka langsung di handler klik
+    pickGalleryPhotos({ auditor }).then(async (shots) => {
+      if (!shots.length) return
+      const photos = []
+      for (const shot of shots) photos.push(await storeNewPhoto(shot))
+      if (parts[0] === 'item') {
+        const r = getResult(curAudit(), parts[1])
+        setResult(parts[1], { photos: (r.photos || []).concat(photos) })
+      } else {
+        const tenant = (getResult(curAudit(), TENANT_ITEM).tenants || []).find((x) => x.id === parts[1])
+        if (!tenant) return
+        tenant[parts[2]] = (tenant[parts[2]] || []).concat(photos)
+        setResult(TENANT_ITEM, { tenants: getResult(curAudit(), TENANT_ITEM).tenants })
+        applyAutoGrade(TENANT_ITEM)
+      }
+      showToast(`${photos.length} foto galeri ditambahkan`)
+      render()
+    })
     return
   }
 

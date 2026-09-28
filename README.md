@@ -47,6 +47,10 @@ Gaya visual mengikuti design system **AeroShift SPBU** (lihat `DESIGN.md`) — i
 
 ## Fitur
 
+**Baru di v3.3**
+- Perbaikan Android: tabel tera 2.2.m muat di layar kecil (nomor + produk digabung, tabel bisa digeser bila perlu); progres & estimasi TS pindah ke strip atas yang ringkas sehingga layar bawah tidak tertutup.
+- **Sementara**: tombol **Galeri** di tiap item & tenant untuk mengunggah foto dari galeri (bisa pilih beberapa sekaligus, tanpa timestamp/kode verifikasi, ditandai "GALERI").
+
 **Baru di v3.2**
 - Tema terang tetap (sama dengan aplikasi PANTAS/Pembongkaran BBM) walau HP memakai mode gelap.
 - Tata letak dirapikan: input tanggal tidak lagi menimpa Tipe Audit, topbar/pencarian/progress/dock solid, notifikasi muncul di atas.

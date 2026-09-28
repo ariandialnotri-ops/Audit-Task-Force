@@ -303,7 +303,9 @@ async function drawPhotos(state, R, loadPhoto) {
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(6.8)
       doc.setTextColor(90, 90, 90)
-      const meta = [x.photo.ts ? new Date(x.photo.ts).toLocaleString('id-ID') : '', x.photo.code ? `Kode ${x.photo.code}` : ''].filter(Boolean).join(' · ')
+      const meta = x.photo.source === 'gallery'
+        ? 'Galeri (tanpa timestamp kamera)'
+        : [x.photo.ts ? new Date(x.photo.ts).toLocaleString('id-ID') : '', x.photo.code ? `Kode ${x.photo.code}` : ''].filter(Boolean).join(' · ')
       doc.text(doc.splitTextToSize(pdfText(meta), w)[0] || '', px, state.y + hs[idx] + 7)
       doc.setTextColor(0, 0, 0)
     })

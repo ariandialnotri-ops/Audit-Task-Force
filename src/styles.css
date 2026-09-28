@@ -736,3 +736,35 @@ body.landing-mode .content{padding-bottom:24px;}
 @keyframes textPulse{0%,100%{opacity:1;transform:none;}45%{opacity:.35;transform:scale(.92);}}
 .top-brand .logo-mark{width:38px;height:30px;}
 .hero-logo{padding:9px;}
+
+/* =========================================================
+   v3.3 — Android: tabel bisa digeser, progres ringkas di atas, foto galeri
+   ========================================================= */
+.table-x{overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-x pan-y;margin:0 -4px;padding:0 4px 4px;}
+.table-x > table{min-width:300px;}
+.tera-table td{vertical-align:middle;}
+.tz-noz b{display:block;font-size:14px;}
+.tz-noz small{display:block;font-size:11px;color:var(--muted);line-height:1.25;max-width:92px;}
+.tera-table input{width:70px;}
+.pm{width:26px;}
+/* Progres ringkas di strip atas (bukan di bawah lagi — layar HP kecil tidak tertutup) */
+.top-progress{margin-top:8px;}
+.pg-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-family:var(--font-ui);font-size:11.5px;color:var(--muted);margin-bottom:5px;white-space:nowrap;}
+.pg-row b{font-family:var(--font-mono);color:var(--text);}
+.pg-row .save-state{font-size:10px;}
+.progress-track.slim{height:4px;}
+.search-dock{padding-bottom:8px;}
+/* Tombol galeri */
+.photo-row{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center;}
+.gallery-btn{display:flex;align-items:center;gap:5px;font-family:var(--font-ui);font-size:12.5px;font-weight:700;color:#006a64;background:rgba(0,194,184,0.12);border:none;border-radius:var(--radius-sm);padding:8px 10px;cursor:pointer;position:relative;overflow:hidden;}
+.gallery-btn svg{width:16px;height:16px;}
+.gallery-btn:disabled{opacity:.45;cursor:not-allowed;}
+.photo-thumb .src-tag{position:absolute;left:3px;bottom:3px;font-family:var(--font-ui);font-size:8.5px;font-weight:800;color:#fff;background:rgba(0,106,100,0.85);border-radius:4px;padding:1px 4px;pointer-events:none;}
+.photo-thumb{position:relative;}
+.item-toolrow{flex-wrap:wrap;row-gap:8px;}
+.table-x > table.tera-table{min-width:0;width:100%;}
+.tera-table th,.tera-table td{padding:4px 3px;}
+.tera-table th:nth-child(3),.tera-table td:nth-child(3){text-align:right;}
+.tera-table input{width:58px;padding:7px 6px;}
+.tz-noz small{max-width:84px;overflow-wrap:normal;word-break:normal;}
+.tera-table td:last-child{width:1%;white-space:nowrap;}
