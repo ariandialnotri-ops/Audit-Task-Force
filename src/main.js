@@ -1408,12 +1408,60 @@ async function loadPhotoForPdf(p) {
   }
 }
 
+/* ----- Modul dinamis & pembaruan aplikasi -----
+   Setelah deploy baru, nama file modul (mis. assets/pdf-XXXX.js) berganti. Halaman yang
+   dibuka sebelum deploy akan gagal memuat modul lama → simpan tindakan yang tertunda,
+   muat ulang halaman sekali, lalu lanjutkan tindakan itu otomatis. */
+const RESUME_KEY = 'tfa_resume'
+function isChunkError(e) {
+  return /dynamically imported module|Importing a module script failed|error loading dynamically imported|Failed to fetch|ChunkLoadError|MIME type/i.test(String((e && e.message) || e))
+}
+async function reloadForUpdate(resume) {
+  let already = false
+  try { already = sessionStorage.getItem(RESUME_KEY + '_done') === '1' } catch { /* ignore */ }
+  if (already || !navigator.onLine) return false
+  try {
+    sessionStorage.setItem(RESUME_KEY, JSON.stringify(resume || {}))
+    sessionStorage.setItem(RESUME_KEY + '_done', '1')
+  } catch { /* ignore */ }
+  showToast('Aplikasi baru saja diperbarui — memuat ulang…', 4000)
+  await flushAll(AUDITS).catch(() => {})
+  setTimeout(() => location.reload(), 600)
+  return true
+}
+function loadPdfModule() {
+  if (!loadPdfModule.p) loadPdfModule.p = import('./lib/pdf.js').catch((e) => { loadPdfModule.p = null; throw e })
+  return loadPdfModule.p
+}
+/** Jalankan kembali tindakan yang tertunda setelah reload karena pembaruan. */
+function resumePendingAction() {
+  let r = null
+  try {
+    r = JSON.parse(sessionStorage.getItem(RESUME_KEY) || 'null')
+    sessionStorage.removeItem(RESUME_KEY)
+    // izinkan reload otomatis lagi pada pembaruan berikutnya (setelah 1 menit)
+    setTimeout(() => { try { sessionStorage.removeItem(RESUME_KEY + '_done') } catch { /* ignore */ } }, 60000)
+  } catch { /* ignore */ }
+  if (!r || !r.auditId || !AUDITS[r.auditId]) return
+  go(r.view || 'report', { auditId: r.auditId })
+  if (r.action === 'pdf') setTimeout(exportPDF, 400)
+}
+
 async function exportPDF() {
   const a = curAudit()
   if (!a) return
   showToast('Menyiapkan PDF A4…', 15000)
+  let mod
   try {
-    const { createReportPdf } = await import('./lib/pdf.js')
+    mod = await loadPdfModule()
+  } catch (e) {
+    console.error(e)
+    if (isChunkError(e) && await reloadForUpdate({ view: 'report', auditId: a.id, action: 'pdf' })) return
+    showToast(navigator.onLine ? 'Modul PDF gagal dimuat. Tutup lalu buka ulang aplikasi, kemudian coba lagi.' : 'Butuh koneksi internet untuk memuat modul PDF pertama kali.', 5000)
+    return
+  }
+  try {
+    const { createReportPdf } = mod
     const R = buildReport(a)
     const doc = await createReportPdf(R, { loadPhoto: loadPhotoForPdf })
     doc.save(R.fileName)
@@ -1545,6 +1593,7 @@ async function initCloud() {
     cloud.mod = await import('./lib/cloud.js')
   } catch (e) {
     console.warn('Modul cloud gagal dimuat', e)
+    if (isChunkError(e) && await reloadForUpdate({})) return
     cloud.loadError = 'Modul login gagal dimuat. Periksa koneksi lalu muat ulang halaman.'
     cloud.ready = true
     render()
@@ -1558,6 +1607,12 @@ async function initCloud() {
   await connectCloud()
   cloud.ready = true
   render()
+  if (cloud.session) {
+    resumePendingAction()
+    // Muat modul PDF di latar saat senggang agar unduhan tidak bergantung pada file lama
+    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 4000))
+    idle(() => { if (navigator.onLine) loadPdfModule().catch(() => {}) })
+  }
 }
 
 /** (Ulang) sambungkan ke API cloud sesuai konfigurasi saat ini. */
@@ -2345,6 +2400,7 @@ async function init() {
   }, true)
   document.getElementById('modalRoot').addEventListener('click', onClick)
   document.addEventListener('pointerdown', addRipple, { passive: true })
+
   app.addEventListener('submit', (ev) => {
     const id = ev.target.id
     if (['loginForm', 'setupForm', 'apiForm', 'pwForm'].includes(id)) ev.preventDefault()
