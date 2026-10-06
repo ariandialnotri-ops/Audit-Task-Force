@@ -15,6 +15,7 @@ import { captureStampedPhoto, pickGalleryPhotos, formatStampTime, verifyPhoto } 
 import { thumbSrc, fullUrl, storeNewPhoto, removePhotoFiles, migrateAuditPhotos, photoLists, photoBlob } from './lib/photos.js'
 import { buildReport, fmtPct, fmtSkor } from './lib/report.js'
 import { LOGO_MARK, LOGO_FULL, APP_NAME } from './assets/logo-mark.js'
+import { AREAS, itemArea, inArea } from './data/area.js'
 
 /* =========================================================
    STATE
@@ -27,6 +28,8 @@ let noteOpenSet = new Set()
 const critOpenSet = new Set()
 let searchQuery = ''
 let pinaltiFilter = null // null | 'all' | elCode
+// Filter tempat pemeriksaan: 'all' | 'lapangan' | 'admin' (diingat per perangkat)
+let areaFilter = (() => { try { return localStorage.getItem('tfa_area') || 'all' } catch { return 'all' } })()
 let nozzleDraft = null // isian "Jumlah Nozzle" sebelum ditekan Submit
 
 /* Cloud (Cloudflare Worker + D1 + R2) — modul dimuat dinamis setelah tampilan pertama. */
@@ -634,17 +637,17 @@ function teraBlock(a) {
   const tera = getResult(a, TERA_ITEM).tera || {}
   return `<div class="calc">
     <div class="calc-head">Tera Bejana Ukur 20 L per Nozzle <span class="mini-pill">batas ${TERA_LIMIT_ML} ml</span></div>
-    <div class="hint">Pilih mode <b>P</b> (Preset) atau <b>M</b> (Manual) lalu isi selisih volume (ml) nozzle yang diperiksa: negatif = kurang, positif = lebih. Kurang dari ${TERA_LIMIT_ML} ml = di bawah toleransi (Red). Kosongkan nozzle yang tidak diperiksa. Nilai A/B/C/F mengikuti tabel ketentuan guideline (jumlah nozzle dicek vs jumlah Red).</div>
+    <div class="hint">Pilih mode <b>P</b> (Preset) atau <b>M</b> (Manual) lalu isi selisih volume (ml) nozzle yang diperiksa: negatif = kurang, positif = lebih (tekan <b>&plusmn;</b> untuk tanda minus — keyboard angka iPhone tidak punya tombol minus). Kurang dari ${TERA_LIMIT_ML} ml = di bawah toleransi (Red). Kosongkan nozzle yang tidak diperiksa. Nilai A/B/C/F mengikuti tabel ketentuan guideline (jumlah nozzle dicek vs jumlah Red).</div>
     ${!e.rows.length ? `<div class="res-pill warn" style="margin:8px 0">Data nozzle belum diisi.</div><button class="btn-ghost" data-back="form">Isi Data Nozzle</button>` : `
     <div class="table-x"><table class="tera-table">
-      <tr><th>Nozzle</th><th>Mode</th><th>Selisih (ml)</th><th></th></tr>
+      <tr><th>Nozzle</th><th>Mode</th><th>Selisih (ml)</th></tr>
       ${e.rows.map((row) => `<tr>
         <td class="tz-noz"><b class="mono">${esc(row.nomor)}</b><small>${esc(row.produk)}</small></td>
         <td><div class="pm-toggle" role="group" aria-label="Mode tera nozzle ${esc(row.nomor)}">
           <button class="pm ${row.mode === 'P' ? 'on' : ''}" data-teramode="${row.id}|P" title="Preset">P</button><button class="pm ${row.mode === 'M' ? 'on' : ''}" data-teramode="${row.id}|M" title="Manual">M</button>
         </div></td>
-        <td><input data-tera="${row.id}" inputmode="numeric" value="${esc(tera[row.id])}" placeholder="—"></td>
-        <td data-terastatus="${row.id}">${teraStatusHtml(row)}</td>
+        <td><div class="tera-in"><button type="button" class="sign-btn ${String(tera[row.id] || '').trim().startsWith('-') ? 'neg' : ''}" data-terasign="${row.id}" aria-label="Ganti tanda minus/plus">&plusmn;</button><input data-tera="${row.id}" inputmode="decimal" enterkeyhint="next" value="${esc(tera[row.id])}" placeholder="—"></div>
+          <div class="tera-st" data-terastatus="${row.id}">${teraStatusHtml(row)}</div></td>
       </tr>`).join('')}
     </table></div>`}
     <div class="calc-out" data-calcout="${TERA_ITEM}">${teraOutHtml(a)}</div>
@@ -773,7 +776,7 @@ function itemCardHtml(a, it, opts = {}) {
   <div class="item-card ${it.pinalti ? 'pinalti' : ''} ${locked ? 'submitted' : ''}" id="item-${it.code.replace(/\./g, '_')}" data-item="${it.code}" data-crumb="${opts.breadcrumb ? 1 : 0}">
     ${opts.breadcrumb ? `<div class="crumb">${esc(breadcrumb(it))}</div>` : ''}
     <div class="item-head">
-      <div class="code">${it.code}${it.pinalti ? '<span class="badge-pinalti">PINALTI</span>' : ''}</div>
+      <div class="code">${it.code}${it.pinalti ? '<span class="badge-pinalti">PINALTI</span>' : ''}<span class="area-tag ${itemArea(it.code)}">${itemArea(it.code) === 'admin' ? 'ADMIN' : 'LAPANGAN'}</span></div>
       <span data-status="${it.code}">${statusChip(r)}</span>
     </div>
     <div class="desc">${esc(it.desc)}</div>
@@ -928,7 +931,7 @@ function pinaltiViewHtml(a) {
   const codes = pinaltiCodes(pinaltiFilter)
   const title = pinaltiFilter === 'all' ? 'Semua Item Pinalti' : `Item Pinalti · ${CHECKLIST_TREE.find((e) => e.code === pinaltiFilter)?.title || ''}`
   const groups = CHECKLIST_TREE.map((el) => {
-    const items = codes.map((c) => ITEM_BY_CODE[c]).filter((it) => it.elCode === el.code)
+    const items = codes.map((c) => ITEM_BY_CODE[c]).filter((it) => it.elCode === el.code && inArea(it.code, areaFilter))
     if (!items.length) return ''
     return `<div class="section-title">${el.code}. ${esc(el.title)}</div>${items.map((it) => itemCardHtml(a, it, { breadcrumb: true })).join('')}`
   }).join('')
@@ -936,7 +939,7 @@ function pinaltiViewHtml(a) {
     <div class="card pin-banner">
       <button class="btn-ghost" data-pinfilter="">&#8249; Checklist Lengkap</button>
       <div class="pin-banner-t">${esc(title)}</div>
-      <div class="hint">${codes.length} item &middot; item pinalti bernilai F membuat SPBU otomatis tidak lulus.</div>
+      <div class="hint">${areaFilter === 'all' ? codes.length : codes.filter((c) => inArea(c, areaFilter)).length} item${areaFilter === 'all' ? '' : ` (${areaFilter === 'admin' ? 'administrasi' : 'lapangan'})`} &middot; item pinalti bernilai F membuat SPBU otomatis tidak lulus.</div>
     </div>
     ${groups}`
 }
@@ -959,24 +962,30 @@ function elementsHtml(a) {
     if (isOpen) {
       body = el.subs.map((sub) => {
         let inner = ''
-        if (sub.items.length) {
+        const subItems = sub.items.filter((it) => inArea(it.code, areaFilter))
+        if (subItems.length) {
           inner += `<div class="subgroup-title">${sub.code} ${esc(sub.title)} <span style="color:var(--muted);font-weight:400;">(bobot ${sub.weight})</span></div>`
-          inner += sub.items.map((it) => itemCardHtml(a, ITEM_BY_CODE[it.code])).join('')
+          inner += subItems.map((it) => itemCardHtml(a, ITEM_BY_CODE[it.code])).join('')
         }
         sub.subsubs.forEach((ss) => {
+          const ssItems = ss.items.filter((it) => inArea(it.code, areaFilter))
+          if (!ssItems.length) return
           inner += `<div class="subgroup-title">${ss.code} ${esc(ss.title)} <span style="color:var(--muted);font-weight:400;">(bobot ${ss.weight})</span></div>`
-          inner += ss.items.map((it) => itemCardHtml(a, ITEM_BY_CODE[it.code])).join('')
+          inner += ssItems.map((it) => itemCardHtml(a, ITEM_BY_CODE[it.code])).join('')
         })
         return inner
       }).join('')
     }
-    const submitted = ALL_ITEMS.filter((i) => i.elCode === el.code && getResult(a, i.code).submittedAt).length
+    const elItems = ALL_ITEMS.filter((i) => i.elCode === el.code && inArea(i.code, areaFilter))
+    if (!elItems.length) return ''
+    const submitted = elItems.filter((i) => getResult(a, i.code).submittedAt).length
+    const areaNote = areaFilter === 'all' ? `${er.graded}/${er.total} dinilai` : `${elItems.length} item ${areaFilter === 'admin' ? 'administrasi' : 'lapangan'}`
     return `<div class="card" style="padding:0;overflow:hidden;" id="el-${el.code}">
       <div class="elem-header" data-toggle-el="${el.code}">
         <div class="idx">${el.code}</div>
         <div class="info">
           <div class="t">${esc(el.title)}</div>
-          <div class="s">${er.graded}/${er.total} dinilai &middot; ${submitted} submit &middot; bobot ${el.weight}</div>
+          <div class="s">${areaNote} &middot; ${submitted}/${elItems.length} submit &middot; bobot ${el.weight}</div>
         </div>
         <span class="compliance-chip" style="background:${band.color}22;color:${band.color};">${er.applicable > 0 ? (er.pct * 100).toFixed(0) + '%' : '-'}</span>
         <span class="chev" style="margin-left:4px;">${isOpen ? '&#9662;' : '&#8250;'}</span>
@@ -984,6 +993,19 @@ function elementsHtml(a) {
       ${isOpen ? `<div class="elem-body">${body}</div>` : ''}
     </div>`
   }).join('')
+}
+
+/** Pilihan tempat pemeriksaan: Semua / Lapangan / Administrasi + progres masing-masing. */
+function areaSwitchHtml(a) {
+  const stat = (id) => {
+    const items = ALL_ITEMS.filter((i) => inArea(i.code, id))
+    return { n: items.length, done: items.filter((i) => getResult(a, i.code).submittedAt).length }
+  }
+  return `<div class="area-switch" role="tablist" aria-label="Tempat pemeriksaan">
+    ${AREAS.map((ar) => { const st = stat(ar.id); return `<button role="tab" aria-selected="${areaFilter === ar.id}" class="area-opt ${areaFilter === ar.id ? 'on' : ''} ${ar.id}" data-area="${ar.id}">
+      <span class="ao-l">${ar.label}</span><span class="ao-n">${st.done}/${st.n}</span></button>` }).join('')}
+  </div>
+  ${areaFilter !== 'all' ? `<div class="hint area-hint">${areaFilter === 'admin' ? 'Pemeriksaan dokumen, catatan, sertifikat & data sistem di kantor SPBU.' : 'Observasi langsung di pulau pompa, dispenser, area tangki, fasilitas & pelayanan operator.'}</div>` : ''}`
 }
 
 function checkBodyHtml() {
@@ -995,6 +1017,7 @@ function checkBodyHtml() {
     <div class="pin-grid" id="pinDash">${pinaltiDashHtml()}</div>
     <div class="hint" style="margin:-2px 4px 14px;">Ketuk kartu untuk memeriksa item pinalti per kategori lebih dahulu, atau lanjutkan ke checklist lengkap di bawah.</div>
     <div class="section-title">Checklist Lengkap</div>
+    ${areaSwitchHtml(a)}
     ${elementsHtml(a)}`
 }
 
@@ -1117,10 +1140,16 @@ function reportFabHtml() {
   return `<button class="report-fab" data-action="submitdata"><span class="fab-ico">${iconFingerprint}</span> Submit Data</button>`
 }
 
+function setAreaFilter(id) {
+  areaFilter = id
+  try { localStorage.setItem('tfa_area', id) } catch { /* ignore */ }
+}
+
 function jumpToItem(code) {
   const it = ITEM_BY_CODE[code]
   if (!it) return
   searchQuery = ''; pinaltiFilter = null; currentElementOpen = it.elCode
+  if (!inArea(code, areaFilter)) setAreaFilter('all')
   render()
   const card = document.getElementById('item-' + it.code.replace(/\./g, '_'))
   if (card) { card.scrollIntoView({ block: 'center', behavior: 'smooth' }); card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 1600) }
@@ -1132,7 +1161,11 @@ function onSubmitData() {
   const { state, left } = submitState(a)
   if (state === 'done') { go('report', { auditId: a.id }); return }
   if (state === 'ready') { submitReport(); return }
-  const next = ALL_ITEMS.find((it) => !getResult(a, it.code).submittedAt)
+  let next = ALL_ITEMS.find((it) => !getResult(a, it.code).submittedAt && inArea(it.code, areaFilter))
+  if (!next) {
+    next = ALL_ITEMS.find((it) => !getResult(a, it.code).submittedAt)
+    setAreaFilter('all')
+  }
   showToast(`Masih ${left} item belum disubmit — menuju ${next.code}`, 2600)
   jumpToItem(next.code)
 }
@@ -2161,6 +2194,33 @@ function onClick(ev) {
     return
   }
 
+  const areaBtn = t.closest('[data-area]')
+  if (areaBtn) {
+    setAreaFilter(areaBtn.dataset.area)
+    const a = curAudit()
+    // buka elemen pertama yang punya item belum disubmit di area ini
+    const first = ALL_ITEMS.find((i) => inArea(i.code, areaFilter) && !getResult(a, i.code).submittedAt) || ALL_ITEMS.find((i) => inArea(i.code, areaFilter))
+    currentElementOpen = first ? first.elCode : null
+    refreshCheckBody()
+    const sw = document.querySelector('.area-switch')
+    if (sw) { sw.scrollIntoView({ block: 'start', behavior: 'smooth' }); const on = sw.querySelector('.area-opt.on'); if (on) springPop(on) }
+    return
+  }
+
+  // Tombol ± tera: keyboard angka iPhone tidak punya tanda minus
+  const signBtn = t.closest('[data-terasign]')
+  if (signBtn) {
+    const inp = signBtn.parentElement.querySelector('input[data-tera]')
+    if (!inp || isLocked(TERA_ITEM)) return
+    const v = inp.value.trim().replace(/^[−–]/, '-')
+    inp.value = v.startsWith('-') ? v.slice(1) : '-' + v
+    signBtn.classList.toggle('neg', inp.value.startsWith('-'))
+    inp.dispatchEvent(new Event('input', { bubbles: true }))
+    inp.focus()
+    try { const L = inp.value.length; inp.setSelectionRange(L, L) } catch { /* ignore */ }
+    return
+  }
+
   const galBtn = t.closest('[data-gallery]')
   if (galBtn) {
     const parts = galBtn.dataset.gallery.split('|')
@@ -2330,6 +2390,8 @@ function onInput(ev) {
   }
 
   if (t.dataset.tera) {
+    const sb = t.parentElement && t.parentElement.querySelector('[data-terasign]')
+    if (sb) sb.classList.toggle('neg', t.value.trim().startsWith('-'))
     const r = getResult(curAudit(), TERA_ITEM)
     setResult(TERA_ITEM, { tera: { ...(r.tera || {}), [t.dataset.tera]: t.value } })
     applyAutoGrade(TERA_ITEM)

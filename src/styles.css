@@ -768,3 +768,27 @@ body.landing-mode .content{padding-bottom:24px;}
 .tera-table input{width:58px;padding:7px 6px;}
 .tz-noz small{max-width:84px;overflow-wrap:normal;word-break:normal;}
 .tera-table td:last-child{width:1%;white-space:nowrap;}
+
+/* =========================================================
+   v3.4 — filter Lapangan / Administrasi, tombol ± tera (iOS)
+   ========================================================= */
+.area-switch{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:5px;margin:0 0 10px;background:rgba(255,255,255,0.7);border:1px solid rgba(255,255,255,0.9);border-radius:var(--radius-pill);box-shadow:0 8px 20px -12px rgba(30,41,59,0.3);}
+.area-opt{position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;min-height:46px;border:none;border-radius:var(--radius-pill);background:transparent;color:var(--muted);font-family:var(--font-ui);cursor:pointer;transition:background .2s,color .2s,transform .18s cubic-bezier(.34,1.56,.64,1);}
+.area-opt .ao-l{font-size:13px;font-weight:800;}
+.area-opt .ao-n{font-family:var(--font-mono);font-size:10.5px;font-weight:700;opacity:.85;}
+.area-opt.on{color:#fff;background:linear-gradient(180deg,var(--primary-container),var(--primary));box-shadow:0 6px 14px -6px rgba(0,80,203,0.6);}
+.area-opt.lapangan.on{background:linear-gradient(180deg,#14b8a6,#0f766e);box-shadow:0 6px 14px -6px rgba(15,118,110,0.6);}
+.area-opt.admin.on{background:linear-gradient(180deg,#a78bfa,#6d28d9);box-shadow:0 6px 14px -6px rgba(109,40,217,0.55);}
+.area-opt:active{transform:scale(.95);}
+.area-hint{margin:-4px 6px 12px;}
+.area-tag{display:inline-block;margin-left:6px;padding:2px 6px;border-radius:6px;font-family:var(--font-ui);font-size:9px;font-weight:800;letter-spacing:.05em;vertical-align:1px;}
+.area-tag.lapangan{color:#0f766e;background:rgba(20,184,166,0.14);}
+.area-tag.admin{color:#6d28d9;background:rgba(139,92,246,0.14);}
+/* Tera: tombol ± di depan isian */
+.tera-in{display:flex;align-items:center;gap:4px;justify-content:flex-end;}
+.sign-btn{flex-shrink:0;width:30px;height:34px;border:none;border-radius:9px;background:rgba(114,118,135,0.14);color:var(--text);font-family:var(--font-mono);font-size:17px;font-weight:800;line-height:1;cursor:pointer;padding:0;transition:background .15s,color .15s,transform .15s;}
+.sign-btn.neg{background:rgba(239,68,68,0.14);color:#B91C1C;}
+.sign-btn:active{transform:scale(.9);}
+.tera-st{text-align:right;margin-top:3px;min-height:14px;}
+.tera-st .res-pill.sm{font-size:9.5px;padding:2px 6px;}
+.tera-table input{width:64px;}

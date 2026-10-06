@@ -47,6 +47,10 @@ Gaya visual mengikuti design system **AeroShift SPBU** (lihat `DESIGN.md`) — i
 
 ## Fitur
 
+**Baru di v3.4**
+- Checklist bisa dipisah per tempat pemeriksaan: **Semua / Lapangan (100) / Administrasi (25)**, lengkap dengan progres masing-masing dan label ADMIN/LAPANGAN di tiap item. Administrasi = dokumen, catatan, sertifikat, data P-Insyst/ATG/POS/CCTV, sampel & P3K di kantor.
+- Tera 2.2.m: tombol **±** untuk tanda minus (keyboard angka iPhone tidak punya tombol minus).
+
 **Baru di v3.3**
 - Perbaikan Android: tabel tera 2.2.m muat di layar kecil (nomor + produk digabung, tabel bisa digeser bila perlu); progres & estimasi TS pindah ke strip atas yang ringkas sehingga layar bawah tidak tertutup.
 - **Sementara**: tombol **Galeri** di tiap item & tenant untuk mengunggah foto dari galeri (bisa pilih beberapa sekaligus, tanpa timestamp/kode verifikasi, ditandai "GALERI").
