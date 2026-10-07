@@ -792,3 +792,5 @@ body.landing-mode .content{padding-bottom:24px;}
 .tera-st{text-align:right;margin-top:3px;min-height:14px;}
 .tera-st .res-pill.sm{font-size:9.5px;padding:2px 6px;}
 .tera-table input{width:64px;}
+.export-row{display:grid;grid-template-columns:1fr;gap:8px;margin-top:10px;}
+.export-row .btn-secondary{font-size:14px;}

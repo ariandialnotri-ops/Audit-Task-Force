@@ -47,6 +47,10 @@ Gaya visual mengikuti design system **AeroShift SPBU** (lihat `DESIGN.md`) — i
 
 ## Fitur
 
+**Baru di v3.5**
+- Halaman Laporan: **Unduh Uji Takar (PDF, tanpa density)** — tabel nozzle (product, mode P/M, hasil tera, qty var, keterangan), rekap per produk, nilai 2.2.m, kolom tanda tangan, foto 2.2.m.
+- **Unduh Semua Foto (ZIP, kualitas asli)** — semua foto item & tenant, nama file berurutan berisi kode item, waktu & kode verifikasi.
+
 **Baru di v3.4**
 - Checklist bisa dipisah per tempat pemeriksaan: **Semua / Lapangan (100) / Administrasi (25)**, lengkap dengan progres masing-masing dan label ADMIN/LAPANGAN di tiap item. Administrasi = dokumen, catatan, sertifikat, data P-Insyst/ATG/POS/CCTV, sampel & P3K di kantor.
 - Tera 2.2.m: tombol **±** untuk tanda minus (keyboard angka iPhone tidak punya tombol minus).

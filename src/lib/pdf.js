@@ -355,4 +355,77 @@ export async function createReportPdf(R, { loadPhoto = null, includePhotos = tru
   return doc
 }
 
+/**
+ * PDF A4 khusus UJI TAKAR (tera bejana ukur 20 L) — tanpa kolom density.
+ * Isi: identitas SPBU & audit, tabel per nozzle, rekap per produk, nilai 2.2.m,
+ * tanda tangan, lalu foto item 2.2.m (bila ada).
+ */
+export async function createTeraPdf(R, { loadPhoto = null } = {}) {
+  const T = R.teraOnly
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
+  doc.setProperties({ title: `Uji Takar ${R.reportNo}`, subject: 'Laporan Uji Takar SPBU', creator: 'Task Force Audit SPBU' })
+  const state = { doc, y: TOP, splitGroups: [] }
+  block(state, (d, y) => {
+    d.setFillColor(...hex(COLORS.navy))
+    d.rect(M, y, CW, 10, 'F')
+    d.setFont('helvetica', 'bold')
+    d.setFontSize(13)
+    d.setTextColor(255, 255, 255)
+    d.text('LAPORAN UJI TAKAR - TERA BEJANA UKUR 20 L', PAGE_W / 2, y + 6.8, { align: 'center' })
+    d.setTextColor(0, 0, 0)
+    d.setFontSize(9)
+    d.text(pdfText(R.unit), PAGE_W / 2, y + 15, { align: 'center' })
+    return y + 18
+  }, 2)
+  block(state, (d, y) => infoTable(d, sectionBar(d, y, 'INFORMASI SPBU & AUDIT'), [R.infoSpbu[0], R.infoSpbu[1], ...R.infoAudit.slice(0, 3)]))
+  const widths = [20, 50, 16, 30, 26, CW - 142]
+  state.y = table(doc, sectionBar(doc, state.y, 'HASIL UJI TAKAR PER NOZZLE') , {
+    head: [['Nozzle Number', 'Product', 'Mode', 'Hasil Tera (ml)', 'Qty Var (%)', 'Keterangan']],
+    body: T.rows.length ? T.rows.map((r) => r.map((c, k) => (k === 5
+      ? { content: pdfText(c), styles: { textColor: c === 'Di bawah toleransi' ? [204, 0, 0] : c === 'Sesuai' ? [56, 118, 29] : [110, 110, 110], fontStyle: c === 'Tidak diperiksa' ? 'italic' : 'bold' } }
+      : pdfText(c)))) : [[{ content: 'Belum ada data nozzle', colSpan: 6, styles: { halign: 'center' } }]],
+    styles: { fontSize: 9, halign: 'center' },
+    headStyles: { fontSize: 8 },
+    columnStyles: Object.fromEntries(widths.map((w, k) => [k, { cellWidth: w }])),
+    showHead: 'everyPage',
+  }) + 2
+  block(state, (d, y) => {
+    d.setFont('helvetica', 'normal')
+    d.setFontSize(7.5)
+    d.setTextColor(128, 128, 128)
+    d.text(pdfText('Mode: P = Preset, M = Manual · Batas tera -60 ml/20 L · Qty Var = hasil tera / 20.000 ml'), M, y + 3)
+    d.setTextColor(0, 0, 0)
+    return y + 5
+  })
+  block(state, (d, y) => table(d, sectionBar(d, y, 'REKAP PER PRODUK'), {
+    head: [['Product', 'Nozzle diperiksa', 'Minimal diperiksa', 'Temuan']],
+    body: T.byProduct.length ? T.byProduct.map((r) => r.map(pdfText)) : [[{ content: '-', colSpan: 4 }]],
+    styles: { fontSize: 9, halign: 'center' },
+  }))
+  block(state, (d, y) => table(d, y, {
+    theme: 'grid',
+    body: [[
+      { content: `Nozzle diperiksa: ${T.checked} dari ${T.total}`, styles: { fontStyle: 'bold' } },
+      { content: `Di bawah toleransi: ${T.red}`, styles: { fontStyle: 'bold', textColor: T.red ? [204, 0, 0] : [0, 0, 0] } },
+      { content: `Nilai item 2.2.m: ${T.grade}`, styles: { fontStyle: 'bold', halign: 'center', fillColor: COLORS.grade[T.grade] ? hex(COLORS.grade[T.grade]) : [255, 255, 255] } },
+    ], ...(T.note ? [[{ content: pdfText('Catatan auditor: ' + T.note), colSpan: 3 }]] : [])],
+    styles: { fontSize: 9.5 },
+  }))
+  block(state, (d, y) => {
+    const auditors = R.infoAudit.filter((r) => /^Auditor \d/.test(r[0])).map((r) => r[1])
+    const colW = CW / 2
+    d.setFont('helvetica', 'normal')
+    d.setFontSize(9)
+    d.text('Auditor,', M + colW / 2, y + 8, { align: 'center' })
+    d.text('Manajer / Pengawas SPBU,', M + colW * 1.5, y + 8, { align: 'center' })
+    d.setFont('helvetica', 'bold')
+    d.text(pdfText(auditors[0] || '(..............................)'), M + colW / 2, y + 32, { align: 'center' })
+    d.text('(..............................)', M + colW * 1.5, y + 32, { align: 'center' })
+    return y + 36
+  })
+  if (loadPhoto && T.photos.length) await drawPhotos(state, { photos: T.photos }, loadPhoto)
+  drawFooters(doc, R, await sha256Short(R.fingerprint + '|tera'))
+  return doc
+}
+
 export const PDF_LAYOUT = { PAGE_W, PAGE_H, M, TOP, BOTTOM }

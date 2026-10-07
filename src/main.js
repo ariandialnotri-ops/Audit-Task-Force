@@ -1403,6 +1403,10 @@ function viewReport() {
   </div>
 
   <button class="btn-primary pdf-btn" data-action="pdf">Unduh Laporan PDF (A4)</button>
+  <div class="export-row">
+    <button class="btn-secondary" data-action="terapdf">Unduh Uji Takar (PDF, tanpa density)</button>
+    <button class="btn-secondary" data-action="photozip">Unduh Semua Foto (ZIP, kualitas asli)</button>
+  </div>
   <p class="hint" style="text-align:center;margin-top:8px;">Format mengikuti laporan Excel: Ringkasan, Detail Checklist, Komentar Auditor, Pengecekan Q&amp;Q, lampiran foto.</p>`
 }
 
@@ -1478,6 +1482,7 @@ function resumePendingAction() {
   if (!r || !r.auditId || !AUDITS[r.auditId]) return
   go(r.view || 'report', { auditId: r.auditId })
   if (r.action === 'pdf') setTimeout(exportPDF, 400)
+  if (r.action === 'terapdf') setTimeout(exportTeraPDF, 400)
 }
 
 async function exportPDF() {
@@ -1502,6 +1507,70 @@ async function exportPDF() {
   } catch (e) {
     console.error(e)
     showToast('Gagal membuat PDF: ' + e.message, 4000)
+  }
+}
+
+/** PDF khusus uji takar (tera 2.2.m) tanpa kolom density + foto item 2.2.m. */
+async function exportTeraPDF() {
+  const a = curAudit()
+  if (!a) return
+  showToast('Menyiapkan PDF uji takar…', 15000)
+  let mod
+  try {
+    mod = await loadPdfModule()
+  } catch (e) {
+    if (isChunkError(e) && await reloadForUpdate({ view: 'report', auditId: a.id, action: 'terapdf' })) return
+    showToast('Modul PDF gagal dimuat: ' + e.message, 5000)
+    return
+  }
+  try {
+    const R = buildReport(a)
+    const doc = await mod.createTeraPdf(R, { loadPhoto: loadPhotoForPdf })
+    doc.save(`Uji_Takar_SPBU_${String(a.info.nomorSpbu || 'SPBU').replace(/[^\w-]+/g, '_')}_${a.info.tanggalAudit || ''}.pdf`)
+    showToast('✓ PDF uji takar diunduh')
+  } catch (e) {
+    console.error(e)
+    showToast('Gagal membuat PDF uji takar: ' + e.message, 4000)
+  }
+}
+
+/** Semua foto audit dalam satu ZIP, file asli dari perangkat (tanpa kompresi ulang). */
+async function exportPhotosZip() {
+  const a = curAudit()
+  if (!a) return
+  const R = buildReport(a)
+  if (!R.photos.length) { showToast('Audit ini belum punya foto'); return }
+  showToast(`Mengumpulkan ${R.photos.length} foto…`, 20000)
+  try {
+    const { makeZip } = await import('./lib/zip.js')
+    const safe = (x) => String(x || '').replace(/[^\w.-]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')
+    const folder = `Foto_SPBU_${safe(a.info.nomorSpbu) || 'SPBU'}_${safe(a.info.tanggalAudit)}`
+    const files = []
+    let missing = 0
+    const pad = (n) => String(n).padStart(2, '0')
+    for (let k = 0; k < R.photos.length; k++) {
+      const { photo: p, caption } = R.photos[k]
+      const blob = await photoBlob(p).catch(() => null)
+      if (!blob) { missing++; continue }
+      const d = new Date(p.ts || Date.now())
+      const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+      const name = `${folder}/${String(k + 1).padStart(3, '0')}_${safe(caption)}_${stamp}${p.source === 'gallery' ? '_galeri' : p.code ? '_' + safe(p.code) : ''}.jpg`
+      files.push({ name, data: new Uint8Array(await blob.arrayBuffer()), date: d })
+    }
+    if (!files.length) { showToast('Foto asli tidak tersedia di perangkat ini. Buka dari HP yang dipakai saat audit.', 5000); return }
+    const zip = makeZip(files)
+    const url = URL.createObjectURL(zip)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${folder}.zip`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 30000)
+    showToast(`✓ ${files.length} foto diunduh (${(zip.size / 1024 / 1024).toFixed(1)} MB)${missing ? ` · ${missing} foto tidak ada di perangkat ini` : ''}`, 5000)
+  } catch (e) {
+    console.error(e)
+    showToast('Gagal membuat ZIP foto: ' + e.message, 4000)
   }
 }
 
@@ -2093,6 +2162,8 @@ function onClick(ev) {
     }
     else if (action === 'goreport') go('report', { auditId: currentAuditId })
     else if (action === 'pdf') exportPDF()
+    else if (action === 'terapdf') exportTeraPDF()
+    else if (action === 'photozip') exportPhotosZip()
     else if (action === 'syncnow') syncNow(true)
     else if (action === 'togglepw') {
       const inp = t.closest('.pw-field').querySelector('input')

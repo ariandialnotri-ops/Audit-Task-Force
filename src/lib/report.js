@@ -191,6 +191,28 @@ export function buildReport(audit) {
       ]
     })
 
+  /* ---------- Uji takar (tera) saja, tanpa kolom density ---------- */
+  const teraRes = getResult(a, '2.2.m')
+  const teraOnly = {
+    rows: [...tera.rows]
+      .sort((x, y) => (parseInt(x.nomor, 10) || 0) - (parseInt(y.nomor, 10) || 0))
+      .map((row) => [
+        dash(row.nomor),
+        String(row.produk || '-').toUpperCase(),
+        row.mode || 'P',
+        row.ml === null ? '-' : String(row.ml),
+        row.qtyVar === null ? '-' : `${(row.qtyVar * 100).toFixed(2)}%`,
+        row.ok === null ? 'Tidak diperiksa' : row.ok ? 'Sesuai' : 'Di bawah toleransi',
+      ]),
+    checked: tera.testedCount,
+    red: tera.failRows.length,
+    total: tera.rows.length,
+    grade: teraRes.grade || '-',
+    note: String(teraRes.note || '').trim(),
+    byProduct: tera.byProduct.map((p) => [String(p.produk).toUpperCase(), `${p.tested}/${p.total}`, String(p.required), p.fail ? `${p.fail} di bawah toleransi` : '-']),
+    photos: (teraRes.photos || []).map((p) => ({ photo: p, caption: 'Item 2.2.m (uji takar)' })),
+  }
+
   /* ---------- Lampiran foto ---------- */
   const photos = []
   ALL_ITEMS.forEach((it) => {
@@ -219,6 +241,9 @@ export function buildReport(audit) {
     komentar,
     komentarManajer: String(i.komentarManajer || '').trim(),
     qq,
+    teraOnly,
+    nomorSpbu: String(i.nomorSpbu || ''),
+    tanggalAudit: String(i.tanggalAudit || ''),
     photos,
     fileName: `Audit_Pertamina_Way_SPBU_${String(i.nomorSpbu || 'SPBU').replace(/[^\w-]+/g, '_')}.pdf`,
     fingerprint: JSON.stringify({ id: a.id, ts: r2(comp.ts), cls: comp.classification, g: ALL_ITEMS.map((it) => getResult(a, it.code).grade || '-').join('') }),
