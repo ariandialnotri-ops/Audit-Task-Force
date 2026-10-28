@@ -313,6 +313,229 @@ async function drawPhotos(state, R, loadPhoto) {
   }
 }
 
+/* ------------------- Lampiran foto per elemen (grid) ------------------- */
+const EV = { cols: 4, gap: 3.5, boxH: 54, headH: 6.5, capH: 8.5 }
+EV.w = (CW - EV.gap * (EV.cols - 1)) / EV.cols
+EV.rowH = EV.headH + 1.2 + EV.boxH + EV.capH
+
+const pad2 = (n) => String(n).padStart(2, '0')
+function photoMeta(p) {
+  if (!p) return ''
+  if (p.source === 'gallery') return 'Galeri (tanpa timestamp)'
+  const d = p.ts ? new Date(p.ts) : null
+  const t = d ? `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)} ${pad2(d.getHours())}.${pad2(d.getMinutes())}` : ''
+  return [t, p.code ? `Kode ${p.code}` : ''].filter(Boolean).join(' · ')
+}
+function fitText(doc, text, w) {
+  const t = pdfText(text)
+  if (doc.getTextWidth(t) <= w) return t
+  let lo = 0
+  let hi = t.length
+  while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (doc.getTextWidth(t.slice(0, mid) + '...') <= w) lo = mid; else hi = mid - 1 }
+  return t.slice(0, lo).trimEnd() + '...'
+}
+const KIND = { temuan: { col: [204, 0, 0], fill: [253, 236, 236], label: 'TEMUAN' }, catatan: { col: [180, 83, 9], fill: [254, 243, 224], label: 'CATATAN' } }
+
+function drawGroupPill(doc, x, y, w, num, group, cont) {
+  const kind = group.kind && KIND[group.kind]
+  doc.setFillColor(...(kind ? kind.fill : [230, 238, 252]))
+  doc.roundedRect(x, y, w, EV.headH, 1.5, 1.5, 'F')
+  doc.setFillColor(...(kind ? kind.col : hex(COLORS.navy)))
+  doc.circle(x + 3.4, y + EV.headH / 2, 2.3, 'F')
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(num > 99 ? 5.5 : 6.5)
+  doc.setTextColor(255, 255, 255)
+  doc.text(String(num), x + 3.4, y + EV.headH / 2 + 0.85, { align: 'center' })
+  doc.setTextColor(...(kind ? kind.col : hex(COLORS.navy)))
+  doc.setFontSize(7.6)
+  const label = `${group.code}${cont ? ' (lanj.)' : ''}  ${group.title}`
+  doc.text(fitText(doc, label, w - 8), x + 6.8, y + EV.headH / 2 + 1)
+  doc.setTextColor(0, 0, 0)
+}
+
+function drawPhotoCell(doc, x, y, cell) {
+  doc.setFillColor(243, 245, 248)
+  doc.setDrawColor(214, 220, 228)
+  doc.setLineWidth(0.2)
+  doc.roundedRect(x, y, EV.w, EV.boxH, 1.5, 1.5, 'FD')
+  const img = cell.img
+  if (img) {
+    const sc = Math.min((EV.w - 1) / img.w, (EV.boxH - 1) / img.h)
+    const iw = img.w * sc
+    const ih = img.h * sc
+    doc.addImage(img.data, 'JPEG', x + (EV.w - iw) / 2, y + (EV.boxH - ih) / 2, iw, ih)
+  } else {
+    doc.setFont('helvetica', 'italic')
+    doc.setFontSize(6.5)
+    doc.setTextColor(120, 120, 120)
+    doc.text('Foto tidak tersedia di perangkat', x + EV.w / 2, y + EV.boxH / 2, { align: 'center' })
+  }
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(7)
+  doc.setTextColor(0, 0, 0)
+  doc.text(fitText(doc, cell.caption, EV.w), x, y + EV.boxH + 3.4)
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(6.3)
+  doc.setTextColor(110, 110, 110)
+  doc.text(fitText(doc, photoMeta(cell.photo), EV.w), x, y + EV.boxH + 6.6)
+  doc.setTextColor(0, 0, 0)
+}
+
+function elementBar(doc, y, code, title, n, accent) {
+  doc.setFillColor(...(accent || hex(COLORS.element)))
+  doc.rect(M, y, CW, 6, 'F')
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(8.5)
+  doc.setTextColor(0, 0, 0)
+  doc.text(pdfText(`Elemen ${code}: ${title}`), M + 2, y + 4.2)
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(7.5)
+  doc.text(pdfText(n), PAGE_W - M - 2, y + 4.2, { align: 'right' })
+  return y + 6 + 2.5
+}
+
+function sectionHead(state, title, sub, count) {
+  const doc = state.doc
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(13)
+  doc.text(pdfText(title), M, state.y + 6)
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(9)
+  doc.setTextColor(90, 90, 90)
+  doc.text(pdfText(count), PAGE_W - M, state.y + 6, { align: 'right' })
+  doc.text(pdfText(sub), M, state.y + 11)
+  doc.setTextColor(0, 0, 0)
+  doc.setDrawColor(...hex(COLORS.navy))
+  doc.setLineWidth(0.5)
+  doc.line(M, state.y + 13.5, PAGE_W - M, state.y + 13.5)
+  doc.setLineWidth(0.2)
+  state.y += 17
+}
+
+async function loadCells(cells, loadPhoto) {
+  return Promise.all(cells.map(async (c) => ({ ...c, img: await loadPhoto(c.photo).catch(() => null) })))
+}
+
+async function drawEvidence(state, S, loadPhoto) {
+  const doc = state.doc
+  const sub = (k) => (k === 'f' ? 'Item bernilai di bawah A atau berisi catatan auditor, dikelompokkan per elemen Pertamina Way' : 'Dokumentasi pendukung item yang memenuhi standar, dikelompokkan per elemen Pertamina Way')
+
+  /* ---- 1) Temuan & Catatan (disorot) ---- */
+  if (S.findings.length) {
+    newPage(state)
+    sectionHead(state, 'LAMPIRAN TEMUAN & CATATAN', sub('f'), `${S.counts.findingGroups} item · ${S.counts.findingPhotos} foto`)
+    let num = 0
+    for (const el of S.findings) {
+      let elDrawn = false
+      for (const g of el.groups) {
+        num++
+        const kind = KIND[g.kind]
+        doc.setFontSize(8)
+        const descLines = doc.splitTextToSize(pdfText(g.fullDesc || g.title), CW - 12)
+        doc.setFontSize(8)
+        const noteLines = g.note ? doc.splitTextToSize(pdfText('Catatan auditor: ' + g.note), CW - 12) : []
+        const headH = 8 + descLines.length * 3.5 + (noteLines.length ? noteLines.length * 3.5 + 3 : 0) + 2
+        const rows = []
+        for (let k = 0; k < g.photos.length; k += EV.cols) rows.push(g.photos.slice(k, k + EV.cols))
+        const firstRowH = rows.length ? EV.boxH + EV.capH + 1 : 6
+        const need = (elDrawn ? 0 : 8.5) + headH + firstRowH
+        if (state.y + need > BOTTOM) newPage(state)
+        if (!elDrawn) { state.y = elementBar(doc, state.y, el.code, el.title, `${el.groups.length} temuan/catatan`, [253, 226, 226]); elDrawn = true }
+        // kartu kepala temuan
+        const y0 = state.y
+        doc.setFillColor(...kind.fill)
+        doc.roundedRect(M, y0, CW, headH, 1.8, 1.8, 'F')
+        doc.setFillColor(...kind.col)
+        doc.rect(M, y0, 1.6, headH, 'F')
+        doc.circle(M + 6.5, y0 + 4.4, 2.6, 'F')
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(7)
+        doc.setTextColor(255, 255, 255)
+        doc.text(String(num), M + 6.5, y0 + 5.3, { align: 'center' })
+        doc.setTextColor(...kind.col)
+        doc.setFontSize(9)
+        doc.text(pdfText(g.code), M + 11, y0 + 5.4)
+        const cw = doc.getTextWidth(pdfText(g.code))
+        doc.setFontSize(7)
+        const badge = `${kind.label}${g.grade ? ' · NILAI ' + (g.grade === 'X' ? 'N/A' : g.grade) : ''}${g.pinalti ? ' · PINALTI' : ''}`
+        const bw = doc.getTextWidth(badge) + 4
+        doc.roundedRect(M + 13 + cw, y0 + 2.2, bw, 4.4, 1.2, 1.2, 'F')
+        doc.setTextColor(255, 255, 255)
+        doc.text(badge, M + 15 + cw, y0 + 5.2)
+        doc.setTextColor(0, 0, 0)
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(8)
+        doc.text(descLines, M + 6, y0 + 10.6)
+        if (noteLines.length) {
+          const ny = y0 + 10.6 + descLines.length * 3.5 + 0.6
+          doc.setFillColor(255, 255, 255)
+          doc.roundedRect(M + 5, ny - 2.6, CW - 9, noteLines.length * 3.5 + 2, 1, 1, 'F')
+          doc.setFont('helvetica', 'bold')
+          doc.setTextColor(...kind.col)
+          doc.text(noteLines, M + 6.5, ny + 0.4)
+          doc.setTextColor(0, 0, 0)
+        }
+        state.y = y0 + headH + 2
+        if (!rows.length) {
+          doc.setFont('helvetica', 'italic')
+          doc.setFontSize(7)
+          doc.setTextColor(120, 120, 120)
+          doc.text('Tidak ada foto untuk item ini.', M + 2, state.y + 2)
+          doc.setTextColor(0, 0, 0)
+          state.y += 6
+        }
+        for (const row of rows) {
+          if (state.y + EV.boxH + EV.capH > BOTTOM) {
+            newPage(state)
+            drawGroupPill(doc, M, state.y, CW, num, g, true)
+            state.y += EV.headH + 1.5
+          }
+          const cells = await loadCells(row, loadPhoto)
+          cells.forEach((c, idx) => drawPhotoCell(doc, M + idx * (EV.w + EV.gap), state.y, c))
+          state.y += EV.boxH + EV.capH + 1
+        }
+        state.y += 3
+      }
+    }
+  }
+
+  /* ---- 2) Evidence (grid rapi seperti lampiran foto) ---- */
+  if (S.evidence.length) {
+    newPage(state)
+    sectionHead(state, 'LAMPIRAN FOTO EVIDENCE', sub('e'), `${S.counts.evidencePhotos} foto`)
+    let num = 0
+    for (const el of S.evidence) {
+      // susun sel: setiap foto satu sel, kelompok mengalir dalam grid 4 kolom
+      const cells = []
+      el.groups.forEach((g) => { num++; g.photos.forEach((ph) => cells.push({ ...ph, group: g, num })) })
+      const rows = []
+      for (let k = 0; k < cells.length; k += EV.cols) rows.push(cells.slice(k, k + EV.cols))
+      let first = true
+      for (const row of rows) {
+        const need = (first ? 8.5 : 0) + EV.rowH
+        if (state.y + need > BOTTOM) newPage(state)
+        if (first) { state.y = elementBar(doc, state.y, el.code, el.title, `${el.groups.reduce((n, g) => n + g.photos.length, 0)} foto`, [226, 234, 248]); first = false }
+        // header kelompok untuk tiap rangkaian sel yang berurutan
+        let k = 0
+        while (k < row.length) {
+          let j = k
+          while (j + 1 < row.length && row[j + 1].group === row[k].group) j++
+          const x = M + k * (EV.w + EV.gap)
+          const w = (j - k + 1) * EV.w + (j - k) * EV.gap
+          const cont = row[k] !== cells.find((c) => c.group === row[k].group)
+          drawGroupPill(doc, x, state.y, w, row[k].num, row[k].group, cont)
+          k = j + 1
+        }
+        const loaded = await loadCells(row, loadPhoto)
+        const y = state.y + EV.headH + 1.2
+        loaded.forEach((c, idx) => drawPhotoCell(doc, M + idx * (EV.w + EV.gap), y, c))
+        state.y += EV.rowH + 2
+      }
+      state.y += 2
+    }
+  }
+}
+
 function drawFooters(doc, R, verifyCode) {
   const total = doc.getNumberOfPages()
   for (let p = 1; p <= total; p++) {
@@ -348,7 +571,10 @@ export async function createReportPdf(R, { loadPhoto = null, includePhotos = tru
   drawDetail(state, R)
   drawKomentar(state, R)
   drawQQ(state, R)
-  if (includePhotos && loadPhoto) await drawPhotos(state, R, loadPhoto)
+  if (includePhotos && loadPhoto) {
+    if (R.photoSections) await drawEvidence(state, R.photoSections, loadPhoto)
+    else await drawPhotos(state, R, loadPhoto)
+  }
   drawFooters(doc, R, await sha256Short(R.fingerprint))
   // Kelompok yang (terpaksa) terpecah karena lebih tinggi dari satu halaman — seharusnya kosong
   doc.reportMeta = { splitGroups: state.splitGroups }

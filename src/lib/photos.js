@@ -18,6 +18,7 @@ export function newPhotoId() {
 /** Semua daftar foto di dalam audit (item + tenant). */
 export function photoLists(audit) {
   const lists = []
+  if (audit.info && Array.isArray(audit.info.fotoUpah)) lists.push(audit.info.fotoUpah)
   Object.values(audit.results || {}).forEach((r) => {
     if (Array.isArray(r.photos)) lists.push(r.photos)
     if (Array.isArray(r.tenants)) r.tenants.forEach((t) => { lists.push(t.fotoTenant || (t.fotoTenant = [])); lists.push(t.fotoIzin || (t.fotoIzin = [])) })

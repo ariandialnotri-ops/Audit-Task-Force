@@ -57,7 +57,7 @@ function defaultInfo() {
     operators: { S1: '', S2: '', S3: '', OFF: '' },
     shiftAudit: [],
     nozzles: [],
-    umkTahunIni: '', upahOperator: '', hariKerja: '', bpjs: '',
+    umkTahunIni: '', upahOperator: '', hariKerja: '', bpjs: '', fotoUpah: [],
     komentarManajer: '',
   }
 }
@@ -68,6 +68,7 @@ function normalizeAudit(a) {
   const i = a.info
   if (!i.areaBusinessHead && i.namaManager) i.areaBusinessHead = i.namaManager
   if (!Array.isArray(i.nozzles)) i.nozzles = []
+  if (!Array.isArray(i.fotoUpah)) i.fotoUpah = []
   // v2 → v3: Koordinator → daftar Auditor
   if (!Array.isArray(i.auditors) || !i.auditors.length) i.auditors = [i.koordinator || '']
   delete i.koordinator
@@ -460,6 +461,13 @@ function viewForm() {
     ${infoInput('umkTahunIni', 'UMK Tahun Ini (Rp)', { inputmode: 'numeric' })}
     <div class="field-row">${infoInput('upahOperator', 'Upah Operator (Rp)', { inputmode: 'numeric' })}${infoInput('hariKerja', 'Hari Kerja/bulan', { inputmode: 'numeric' })}</div>
     ${infoInput('bpjs', 'Bukti bayar/kepesertaan BPJS', { placeholder: 'Tersedia / Tidak tersedia' })}
+    <div class="calc-sec">Foto bukti upah / slip gaji / BPJS</div>
+    <div class="photo-row">
+      <button class="photo-btn" data-upahphoto>${iconCamera} Foto (${(i.fotoUpah || []).length})</button>
+      <button class="gallery-btn" data-gallery="upah">${iconGallery} Galeri</button>
+    </div>
+    ${thumbsHtml(i.fotoUpah, 'data-rmupah', 'upah')}
+    <div class="hint" style="margin-top:6px">Foto masuk ke lampiran laporan pada Elemen 1 (3S).</div>
   </div>
 
   <button class="btn-primary" data-action="tochecklist">Lanjut ke Checklist &#8250;</button>
@@ -1285,6 +1293,9 @@ async function openPhotoViewer(key) {
     const tenant = (getResult(a, TENANT_ITEM).tenants || []).find((x) => x.id === parts[1])
     photo = tenant && (tenant[parts[2]] || [])[+parts[3]]
     caption = `${TENANT_ITEM} · ${tenant ? tenant.nama || 'Tenant' : ''} · ${parts[2] === 'fotoIzin' ? 'Izin Prinsip' : 'Tenant'}`
+  } else if (parts[0] === 'upah') {
+    photo = (a.info.fotoUpah || [])[+parts[1]]
+    caption = 'Data upah & ketenagakerjaan'
   } else if (parts[0] === 'id') {
     const hit = buildReport(a).photos.find((x) => x.photo && x.photo.id === parts[1])
     if (hit) { photo = hit.photo; caption = hit.caption }
@@ -1352,11 +1363,24 @@ function viewReport() {
   const qq = R.qq.length ? reportTable(['Nozzle', 'Produk', 'Mode', 'Tera (ml)', 'Qty Var', 'Obs', 'Temp', 'D15', 'Ref D15', 'Var'],
     R.qq.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`)) : '<p class="hint">Belum ada data nozzle.</p>'
 
-  const photoHtml = R.photos.length ? `
-    <div class="section-title">Dokumentasi Foto (${R.photos.length})</div>
-    <div class="card"><div class="report-photo-grid">
-      ${R.photos.map(({ photo: p, caption }) => `<div data-viewphoto="id|${esc(p.id || '')}"><img src="${thumbSrc(p)}" data-full="${esc(p.id || '')}" alt=""><div class="cap">${esc(caption)}${p && p.source === 'gallery' ? '<br>Galeri' : `${p && p.ts ? `<br>${esc(formatStampTime(p.ts))}` : ''}${p && p.code ? `<br>Kode ${esc(p.code)}` : ''}`}</div></div>`).join('')}
-    </div></div>` : ''
+  const S = R.photoSections
+  const tile = ({ photo: p, caption }) => `<div class="ev-tile" data-viewphoto="id|${esc(p.id || '')}"><div class="ev-img"><img src="${thumbSrc(p)}" data-full="${esc(p.id || '')}" alt="" loading="lazy"></div>
+    <b>${esc(caption)}</b><small>${p.source === 'gallery' ? 'Galeri' : `${p.ts ? esc(formatStampTime(p.ts)) : ''}${p.code ? ' · ' + esc(p.code) : ''}`}</small></div>`
+  let fNum = 0
+  let eNum = 0
+  const findingsHtml = S.findings.map((el) => `<div class="ev-el find">Elemen ${el.code} · ${esc(el.title)}</div>
+    ${el.groups.map((g) => `<div class="ev-find ${g.kind}">
+      <div class="ev-fh"><span class="ev-num">${++fNum}</span><b>${esc(g.code)}</b><span class="ev-badge">${g.kind === 'temuan' ? 'TEMUAN' : 'CATATAN'}${g.grade ? ' · NILAI ' + (g.grade === 'X' ? 'N/A' : g.grade) : ''}${g.pinalti ? ' · PINALTI' : ''}</span></div>
+      <div class="ev-desc">${esc(g.fullDesc || g.title)}</div>
+      ${g.note ? `<div class="ev-note">${esc(g.note)}</div>` : ''}
+      ${g.photos.length ? `<div class="ev-grid">${g.photos.map(tile).join('')}</div>` : '<div class="hint">Tidak ada foto untuk item ini.</div>'}
+    </div>`).join('')}`).join('')
+  const evidenceHtml = S.evidence.map((el) => `<div class="ev-el">Elemen ${el.code} · ${esc(el.title)}</div>
+    ${el.groups.map((g) => `<div class="ev-group"><div class="ev-gh"><span class="ev-num">${++eNum}</span><b>${esc(g.code)}</b> ${esc(g.title)}</div>
+      <div class="ev-grid">${g.photos.map(tile).join('')}</div></div>`).join('')}`).join('')
+  const photoHtml = `
+    ${S.findings.length ? `<div class="section-title">Lampiran Temuan &amp; Catatan (${S.counts.findingGroups})</div><div class="card">${findingsHtml}</div>` : ''}
+    ${S.evidence.length ? `<div class="section-title">Lampiran Foto Evidence (${S.counts.evidencePhotos})</div><div class="card">${evidenceHtml}</div>` : ''}`
 
   return `
   <div id="reportContent">
@@ -2297,6 +2321,17 @@ function onClick(ev) {
     const parts = galBtn.dataset.gallery.split('|')
     const a = curAudit()
     if (parts[0] === 'item' && isLocked(parts[1])) return
+    if (parts[0] === 'upah') {
+      const auditorU = currentUserName() || (a.info.auditors || []).find((x) => x) || ''
+      pickGalleryPhotos({ auditor: auditorU }).then(async (shots) => {
+        if (!shots.length) return
+        for (const shot of shots) a.info.fotoUpah.push(await storeNewPhoto(shot))
+        persist(a.id)
+        showToast(`${shots.length} foto galeri ditambahkan`)
+        render()
+      })
+      return
+    }
     if (parts[0] === 'tenant' && tenantLocked(a)) return
     const auditor = currentUserName() || (a.info.auditors || []).find((x) => x) || ''
     // pemilih file harus dibuka langsung di handler klik
@@ -2331,6 +2366,29 @@ function onClick(ev) {
       showToast('Foto ditambahkan')
       render()
     })
+    return
+  }
+
+  if (t.closest('[data-upahphoto]')) {
+    const a = curAudit()
+    takePhoto('Data Upah & Ketenagakerjaan').then((photo) => {
+      if (!photo) return
+      a.info.fotoUpah = (a.info.fotoUpah || []).concat([photo])
+      persist(a.id)
+      showToast('Foto ditambahkan')
+      render()
+    })
+    return
+  }
+  const rmUpah = t.closest('[data-rmupah]')
+  if (rmUpah) {
+    const a = curAudit()
+    const idx = parseInt(rmUpah.dataset.rmupah, 10)
+    if (!confirm('Hapus foto ini?')) return
+    removePhotoFiles([a.info.fotoUpah[idx]]).catch(() => {})
+    a.info.fotoUpah = a.info.fotoUpah.filter((_, k) => k !== idx)
+    persist(a.id)
+    render()
     return
   }
 

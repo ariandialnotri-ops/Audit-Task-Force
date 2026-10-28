@@ -47,6 +47,10 @@ Gaya visual mengikuti design system **AeroShift SPBU** (lihat `DESIGN.md`) — i
 
 ## Fitur
 
+**Baru di v3.6**
+- Form **Data Ketenagakerjaan**: foto bukti upah / slip gaji / BPJS (kamera atau galeri), masuk lampiran Elemen 1.
+- Lampiran laporan (PDF & aplikasi) disusun per elemen Pertamina Way dalam grid rapi: **Lampiran Temuan & Catatan** (disorot, lengkap dengan nilai, deskripsi item & catatan auditor) dipisah dari **Lampiran Foto Evidence** (item yang memenuhi standar).
+
 **Baru di v3.5**
 - Halaman Laporan: **Unduh Uji Takar (PDF, tanpa density)** — tabel nozzle (product, mode P/M, hasil tera, qty var, keterangan), rekap per produk, nilai 2.2.m, kolom tanda tangan, foto 2.2.m.
 - **Unduh Semua Foto (ZIP, kualitas asli)** — semua foto item & tenant, nama file berurutan berisi kode item, waktu & kode verifikasi.

@@ -21,6 +21,7 @@ Aplikasi audit SPBU Pertamina Way (standar "Pasti Pas"). Auditor mengisi checkli
 - `src/lib/camera.js` — kamera getUserMedia layar penuh, **tanpa GPS**. Setelah jepret ada pratinjau (Ulangi / Gunakan Foto). Stamp: tanggal-jam, SPBU · item, auditor · kode verifikasi (8 hex dari SHA-256). Metadata foto menyimpan `code`, `sha256` (sidik file) dan `auditor`; `verifyPhoto()` → valid/changed/unknown (`cloudSha256` = salinan terkompres di cloud). **Sementara** ada juga tombol **Galeri** (`pickGalleryPhotos()`): foto dari galeri tanpa stamp, dikecilkan 1280 px, metadata `source: 'gallery'`, `fileDate`, `sha256` (tanpa `code`); ditandai "GALERI" di thumbnail, penampil, laporan & PDF.
 - `src/lib/report.js` — `buildReport(audit)`: isi laporan persis struktur Excel referensi `Audit_Pertamina_Way_SPBU_*.xlsx` (Ringkasan, Detail Checklist per kelompok, Komentar Auditor, Pengecekan Q&Q, lampiran foto). Dipakai tampilan Laporan dan PDF.
 - `src/lib/pdf.js` — PDF **A4 vektor** (jsPDF + jspdf-autotable, dimuat dinamis). Aturan: margin 12 mm, setiap blok/kelompok diukur di dokumen sementara lalu dipindah utuh ke halaman baru bila tidak muat (`doc.reportMeta.splitGroups` harus kosong), `rowPageBreak: 'avoid'`, header kolom diulang, footer No. Report + kode verifikasi laporan + halaman. Teks dilewatkan `pdfText()` (font standar WinAnsi).
+- Lampiran foto laporan (`buildPhotoSections()` di report.js → `R.photoSections`): per elemen Pertamina Way, dua bagian — **Temuan & Catatan** (item bernilai < A = temuan, atau punya catatan/nama operator = catatan; disorot merah/oranye, tetap tampil walau tanpa foto) lalu **Foto Evidence** (grid 4 kolom, header bernomor per item, gaya contoh lampiran PANTAS). PDF: `drawEvidence()`; tampilan app: `.ev-*`.
 - Ekspor tambahan di halaman Laporan: **Uji Takar (PDF)** = `createTeraPdf(R)` dari `R.teraOnly` (tabel nozzle tanpa kolom density + rekap per produk + nilai 2.2.m + tanda tangan + foto 2.2.m), dan **Semua Foto (ZIP)** = `src/lib/zip.js` (ZIP STORE tanpa kompresi ulang; file asli dari IndexedDB perangkat — foto hasil unduhan cloud hanya versi 1024 px).
 - Tema **selalu terang** (tidak ikut dark mode HP), kanvas sama dengan PANTAS: `radial-gradient(1200px 800px at 50% -10%, rgba(179,197,255,.35))` + `linear-gradient(#e9eff6→#dde7f3)`. Topbar, strip pencarian, progress & dock dibuat solid agar konten di belakangnya tidak tampak bertumpuk.
 - Login: logo di landing page ber-animasi morphing (`logoMorph()`: kelas `.morphing` / `.morph-out` / `.morph-fail`; setiap anak SVG `.logo-mark` diberi `--i` oleh `indexLogoParts()` sehingga logo SVG pengganti tetap bisa di-morph). Footer landing: © Task Force Audit SPBU · Created by Ariandi Alnotri.
@@ -43,7 +44,8 @@ audit = {
           operators: { S1, S2, S3, OFF },           // jumlah operator per kategori shift (NS/MD dihapus v3.1)
           shiftAudit: ['S1', 'NS', ...],            // shift yang bertugas saat audit (OFF tidak dihitung)
           nozzles: [{ id, nomor, produk }],         // nomor dipilih dari dropdown setelah Submit jumlah
-          umkTahunIni, upahOperator, hariKerja, bpjs, komentarManajer },
+          umkTahunIni, upahOperator, hariKerja, bpjs, komentarManajer,
+          fotoUpah: [foto] },                       // bukti upah/slip/BPJS (ikut photoLists → cloud & lampiran Elemen 1)
   reportNo?, reportSubmittedAt?,            // diisi saat "Submit Laporan" (status → 'selesai')
   results: {
     [itemCode]: { grade, note, photos: [{id, thumb, ts, code, sha256, auditor, path?}], jumlah, submittedAt,

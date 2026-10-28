@@ -222,6 +222,10 @@ export function buildReport(audit) {
     ;(t.fotoTenant || []).forEach((p) => photos.push({ photo: p, caption: `${TENANT_ITEM} ${t.nama || ''} (tenant)` }))
     ;(t.fotoIzin || []).forEach((p) => photos.push({ photo: p, caption: `${TENANT_ITEM} ${t.nama || ''} (izin prinsip)` }))
   })
+  ;(i.fotoUpah || []).forEach((p) => photos.push({ photo: p, caption: 'Data upah & ketenagakerjaan' }))
+
+  /* ---------- Lampiran per elemen: Temuan & Catatan vs Evidence ---------- */
+  const photoSections = buildPhotoSections(a)
 
   return {
     title: REPORT_TITLE,
@@ -242,10 +246,60 @@ export function buildReport(audit) {
     komentarManajer: String(i.komentarManajer || '').trim(),
     qq,
     teraOnly,
+    photoSections,
     nomorSpbu: String(i.nomorSpbu || ''),
     tanggalAudit: String(i.tanggalAudit || ''),
     photos,
     fileName: `Audit_Pertamina_Way_SPBU_${String(i.nomorSpbu || 'SPBU').replace(/[^\w-]+/g, '_')}.pdf`,
     fingerprint: JSON.stringify({ id: a.id, ts: r2(comp.ts), cls: comp.classification, g: ALL_ITEMS.map((it) => getResult(a, it.code).grade || '-').join('') }),
   }
+}
+
+const shortText = (s, n) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t }
+
+/**
+ * Kelompokkan foto per elemen Pertamina Way, lalu per item. Item dengan nilai di
+ * bawah A (temuan) atau yang punya catatan auditor masuk ke `findings` (disorot);
+ * sisanya ke `evidence`. Temuan/catatan tetap tercantum walau tanpa foto.
+ * Kembalian: { findings: [elSection], evidence: [elSection], counts }
+ * elSection = { code, title, groups: [{ key, code, title, kind:'temuan'|'catatan'|null,
+ *               grade, note, photos: [{ photo, caption }] }] }
+ */
+export function buildPhotoSections(a) {
+  const i = a.info || {}
+  const findings = []
+  const evidence = []
+  let nFind = 0
+  let nEvid = 0
+  CHECKLIST_TREE.forEach((el) => {
+    const fGroups = []
+    const eGroups = []
+    const items = ALL_ITEMS.filter((it) => it.elCode === el.code)
+    const push = (g) => {
+      if (g.kind) { fGroups.push(g); nFind += g.photos.length }
+      else if (g.photos.length) { eGroups.push(g); nEvid += g.photos.length }
+    }
+    if (el.code === '1') {
+      const up = (i.fotoUpah || []).map((p) => ({ photo: p, caption: 'Bukti upah / BPJS' }))
+      if (up.length) push({ key: 'upah', code: 'Upah', title: 'Data Upah & Ketenagakerjaan', kind: null, grade: '', note: '', photos: up })
+    }
+    items.forEach((it) => {
+      const r = getResult(a, it.code)
+      const opNames = OPERATOR_ITEMS[it.code] && r.pct && String(r.pct.names || '').trim()
+      const note = [String(r.note || '').trim(), opNames ? `Operator tidak memenuhi: ${opNames}` : ''].filter(Boolean).join(' · ')
+      const kind = r.grade && !['A', 'X'].includes(r.grade) ? 'temuan' : note ? 'catatan' : null
+      const caption = shortText(it.desc, 60)
+      let list = (r.photos || []).map((p) => ({ photo: p, caption }))
+      if (it.code === TENANT_ITEM) {
+        ;(r.tenants || []).forEach((t) => {
+          ;(t.fotoTenant || []).forEach((p) => list.push({ photo: p, caption: `${t.nama || 'Tenant'} · tenant` }))
+          ;(t.fotoIzin || []).forEach((p) => list.push({ photo: p, caption: `${t.nama || 'Tenant'} · izin prinsip` }))
+        })
+      }
+      push({ key: it.code, code: it.code, title: shortText(it.desc, 90), fullDesc: it.desc.replace(/\s+/g, ' ').trim(), kind, grade: r.grade || '', note, pinalti: !!it.pinalti, photos: list })
+    })
+    if (fGroups.length) findings.push({ code: el.code, title: el.title, groups: fGroups })
+    if (eGroups.length) evidence.push({ code: el.code, title: el.title, groups: eGroups })
+  })
+  return { findings, evidence, counts: { findingGroups: findings.reduce((n, s) => n + s.groups.length, 0), findingPhotos: nFind, evidencePhotos: nEvid } }
 }
