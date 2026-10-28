@@ -63,6 +63,7 @@ Gaya visual mengikuti design system **AeroShift SPBU** (lihat `DESIGN.md`) — i
 
 **Baru di v3.4**
 - Checklist bisa dipisah per tempat pemeriksaan: **Semua / Lapangan (100) / Administrasi (25)**, lengkap dengan progres masing-masing dan label ADMIN/LAPANGAN di tiap item. Administrasi = dokumen, catatan, sertifikat, data P-Insyst/ATG/POS/CCTV, sampel & P3K di kantor.
+- Checklist **CCU** punya shortcut tetap di bagian atas: **Semua / Lapangan (86) / Admin (72)** dengan badge sisa item; mode Admin/Lapangan hanya menampilkan aspek & item area tersebut.
 - Tera 2.2.m: tombol **±** untuk tanda minus (keyboard angka iPhone tidak punya tombol minus).
 
 **Baru di v3.3**

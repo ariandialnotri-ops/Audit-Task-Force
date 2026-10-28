@@ -852,3 +852,27 @@ body.landing-mode .content{padding-bottom:24px;}
 body.audit-mode .tabbar{display:none;}
 body.audit-mode .content{padding-bottom:calc(96px + env(safe-area-inset-bottom,0px));}
 body.audit-mode .report-fab{bottom:calc(env(safe-area-inset-bottom,0px) + 22px);}
+
+/* Shortcut Lapangan / Administrasi di strip atas checklist CCU */
+.area-quick{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr) minmax(0,1fr);gap:6px;margin-top:8px;}
+.aq-opt{position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;gap:5px;min-height:38px;padding:0 8px;border-radius:var(--radius-pill);border:1px solid rgba(0,80,203,0.14);background:#fff;color:var(--muted);font-family:var(--font-ui);font-size:12.5px;font-weight:800;cursor:pointer;transition:background .2s,color .2s,transform .18s cubic-bezier(.34,1.56,.64,1);}
+.aq-opt svg{width:16px;height:16px;flex-shrink:0;}
+.aq-opt span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.aq-opt em{font-style:normal;font-family:var(--font-mono);font-size:10px;min-width:18px;height:18px;line-height:18px;border-radius:9px;padding:0 5px;background:rgba(245,158,11,0.18);color:#B45309;}
+.aq-opt em.done{background:rgba(16,185,129,0.18);color:#047857;}
+.aq-opt.all svg{display:none;}
+.aq-opt.lapangan{color:#0f766e;}
+.aq-opt.admin{color:#6d28d9;}
+.aq-opt.on{color:#fff;border-color:transparent;background:linear-gradient(180deg,var(--primary-container),var(--primary));box-shadow:0 6px 14px -6px rgba(0,80,203,0.6);}
+.aq-opt.lapangan.on{background:linear-gradient(180deg,#14b8a6,#0f766e);}
+.aq-opt.admin.on{background:linear-gradient(180deg,#a78bfa,#6d28d9);}
+.aq-opt.on em{background:rgba(255,255,255,0.25);color:#fff;}
+.aq-opt:active{transform:scale(.95);}
+@media (max-width:370px){ .aq-opt span{font-size:11px;} .aq-opt{gap:3px;padding:0 5px;} }
+.area-banner{display:flex;align-items:center;gap:10px;padding:10px 12px;margin:0 0 12px;border-radius:14px;background:rgba(20,184,166,0.10);border:1px solid rgba(20,184,166,0.25);color:#0f766e;font-family:var(--font-ui);}
+.area-banner.admin{background:rgba(139,92,246,0.10);border-color:rgba(139,92,246,0.25);color:#6d28d9;}
+.area-banner > svg{width:26px;height:26px;flex-shrink:0;}
+.area-banner div{flex:1;min-width:0;display:flex;flex-direction:column;}
+.area-banner b{font-size:14px;}
+.area-banner span{font-size:11.5px;color:var(--muted);}
+.card,.item-card,.search-hit{scroll-margin-top:calc(env(safe-area-inset-top,0px) + 170px);}

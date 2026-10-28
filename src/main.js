@@ -946,6 +946,8 @@ function patchProgress() {
   if (pd) pd.innerHTML = pinaltiDashHtml()
   const fab = document.getElementById('reportFab')
   if (fab) fab.innerHTML = reportFabHtml()
+  const aqb = document.getElementById('areaQuick')
+  if (aqb && isCcu(curAudit())) aqb.innerHTML = ccuAreaQuickHtml(curAudit())
   const cd = document.getElementById('ccuDash')
   if (cd && isCcu(curAudit())) cd.innerHTML = ccuDashInner(computeCcu(curAudit()))
   const sd = document.getElementById('submitDataSlot')
@@ -1085,6 +1087,22 @@ function areaSwitchHtml(a) {
   ${areaFilter !== 'all' ? `<div class="hint area-hint">${areaFilter === 'admin' ? 'Pemeriksaan dokumen, catatan, sertifikat & data sistem di kantor SPBU.' : 'Observasi langsung di pulau pompa, dispenser, area tangki, fasilitas & pelayanan operator.'}</div>` : ''}`
 }
 
+const iconField = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M3 21h12"/><path d="M7 7h4v4H7z"/><path d="M14 9h2a2 2 0 0 1 2 2v5a1.5 1.5 0 0 0 3 0V8l-3-3"/></svg>`
+const iconOffice = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>`
+const iconAll = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>`
+
+/** Shortcut CCU Semua / Lapangan / Admin di strip atas checklist + sisa item per area. */
+function ccuAreaQuickHtml(a) {
+  const items = ccuApplicableItems(a)
+  const left = (id) => items.filter((i) => inArea(i.code, id) && !getResult(a, i.code).submittedAt).length
+  const opts = [
+    { id: 'all', label: 'Semua', icon: iconAll },
+    { id: 'lapangan', label: 'Lapangan', icon: iconField },
+    { id: 'admin', label: 'Admin', icon: iconOffice },
+  ]
+  return opts.map((o) => { const n = left(o.id); return `<button class="aq-opt ${o.id} ${areaFilter === o.id ? 'on' : ''}" data-area="${o.id}" aria-pressed="${areaFilter === o.id}">${o.icon}<span>${o.label}</span><em class="${n ? '' : 'done'}">${n || '✓'}</em></button>` }).join('')
+}
+
 function checkBodyHtml() {
   const a = curAudit()
   if (isCcu(a)) return ccuBodyHtml(a)
@@ -1105,7 +1123,7 @@ function viewChecklist() {
     ${iconSearch}
     <input id="searchInput" type="search" autocomplete="off" placeholder="${isCcu(curAudit()) ? 'Cari item CCU… cth. APAR, 5R, Bright Store' : 'Cari item… cth. APAR, toilet, density'}" value="${esc(searchQuery)}">
     ${searchQuery ? `<button class="search-clear" data-action="clearsearch" aria-label="Hapus pencarian">&times;</button>` : ''}
-  </div><div class="top-progress" id="progressBox">${progressHtml()}</div></div>
+  </div>${isCcu(curAudit()) ? `<div class="area-quick" id="areaQuick" role="group" aria-label="Pisah checklist Lapangan / Administrasi">${ccuAreaQuickHtml(curAudit())}</div>` : ''}<div class="top-progress" id="progressBox">${progressHtml()}</div></div>
   <div id="checkBody">${checkBodyHtml()}</div>
   <div id="reportFab">${reportFabHtml()}</div>`
 }
@@ -1227,7 +1245,7 @@ function jumpToItem(code) {
   const it = itemDef(code)
   if (!it) return
   searchQuery = ''; pinaltiFilter = null; currentElementOpen = isCcu(curAudit()) ? it.secCode : it.elCode
-  if (!isCcu(curAudit()) && !inArea(code, areaFilter)) setAreaFilter('all')
+  if (!inArea(code, areaFilter)) setAreaFilter('all')
   render()
   const card = document.getElementById('item-' + it.code.replace(/\./g, '_'))
   if (card) { card.scrollIntoView({ block: 'center', behavior: 'smooth' }); card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 1600) }
@@ -1732,7 +1750,7 @@ function ccuItemCardHtml(a, it, opts = {}) {
   <div class="item-card ${locked ? 'submitted' : ''}" id="item-${it.code.replace(/\./g, '_')}" data-item="${it.code}" data-crumb="${opts.breadcrumb ? 1 : 0}">
     ${opts.breadcrumb ? `<div class="crumb">${esc(crumb)}</div>` : ''}
     <div class="item-head">
-      <div class="code">${it.code}<span class="type-tag ccu sm">CCU</span></div>
+      <div class="code">${it.code}<span class="type-tag ccu sm">CCU</span><span class="area-tag ${itemArea(it.code)}">${itemArea(it.code) === 'admin' ? 'ADMIN' : 'LAPANGAN'}</span></div>
       <span data-status="${it.code}">${statusChip(r)}</span>
     </div>
     <div class="desc">${esc(it.desc)}</div>
@@ -1767,8 +1785,12 @@ function ccuBodyHtml(a) {
       ${hits.map((it) => `<div class="search-hit">${ccuItemCardHtml(a, it, { breadcrumb: true })}<button class="jump-link" data-jump="${it.code}">Buka di checklist &#8250;</button></div>`).join('') || '<div class="hint">Tidak ada item yang cocok.</div>'}`
   }
   const dash = `<div class="ccu-dash" id="ccuDash">${ccuDashInner(comp)}</div>`
+  const ar = areaFilter
+  const inAr = (code) => inArea(code, ar)
   const secs = CCU_SECTIONS.map((s) => {
     const sc = comp.sections.find((x) => x.code === s.code)
+    const secItems = ccuApplicableItems(a).filter((it) => it.secCode === s.code && inAr(it.code))
+    if (ar !== 'all' && !secItems.length) return ''
     const isOpen = currentElementOpen === s.code
     const col = CCU_STATUS_COLOR[sc.score <= 35 ? 'Warning' : sc.score <= 60 ? 'Poor' : sc.score <= 80 ? 'Average' : sc.score <= 95 ? 'Good' : 'Excellent']
     let body = ''
@@ -1778,7 +1800,7 @@ function ccuBodyHtml(a) {
       } else {
         const parts = s.parts || [{ code: null, groups: s.groups }]
         body = parts.map((p, k) => `${p.code ? `<div class="subgroup-title ccu-part">${esc(p.code)} ${esc(p.title)} <span class="mini-pill">${sc.parts[k].score.toFixed(2)}</span></div>` : ''}
-          ${p.groups.map((g) => `${g.code ? `<div class="subgroup-title">${esc(g.code)} ${esc(g.title)}</div>` : ''}${g.items.map((it) => ccuItemCardHtml(a, CCU_BY_CODE[it.code])).join('')}`).join('')}`).join('')
+          ${p.groups.map((g) => { const gi = g.items.filter((it) => inAr(it.code)); return gi.length ? `${g.code ? `<div class="subgroup-title">${esc(g.code)} ${esc(g.title)}</div>` : ''}${gi.map((it) => ccuItemCardHtml(a, CCU_BY_CODE[it.code])).join('')}` : '' }).join('')}`).join('')
       }
     }
     return `<div class="card" style="padding:0;overflow:hidden;" id="el-${s.code}">
@@ -1786,7 +1808,7 @@ function ccuBodyHtml(a) {
         <div class="idx ccu-idx">${s.code}</div>
         <div class="info">
           <div class="t">${esc(s.title.replace(/^PENGECEKAN\s+/, ''))}</div>
-          <div class="s">${sc.skipped ? 'tidak berlaku (nilai A)' : `${sc.submitted}/${sc.applicable} submit`} &middot; bobot ${Math.round(s.bobot * 100)}%</div>
+          <div class="s">${sc.skipped ? 'tidak berlaku (nilai A)' : ar === 'all' ? `${sc.submitted}/${sc.applicable} submit` : `${secItems.filter((it) => getResult(a, it.code).submittedAt).length}/${secItems.length} ${ar === 'admin' ? 'administrasi' : 'lapangan'}`} &middot; bobot ${Math.round(s.bobot * 100)}%</div>
         </div>
         <span class="compliance-chip" style="background:${col}22;color:${col};">${sc.score.toFixed(0)}</span>
         <span class="chev" style="margin-left:4px;">${isOpen ? '&#9662;' : '&#8250;'}</span>
@@ -1794,6 +1816,14 @@ function ccuBodyHtml(a) {
       ${isOpen ? `<div class="elem-body">${body}</div>` : ''}
     </div>`
   }).join('')
+  if (ar !== 'all') {
+    const n = ccuApplicableItems(a).filter((it) => inAr(it.code)).length
+    return `<div class="area-banner ${ar}">
+        ${ar === 'admin' ? iconOffice : iconField}
+        <div><b>Mode ${ar === 'admin' ? 'Administrasi / Office' : 'Observasi Lapangan'}</b><span>${n} item · ${ar === 'admin' ? 'dokumen, catatan, dashboard/sistem, keuangan, legal & sosmed' : 'area SPBU, peralatan, pelayanan petugas & Bright Store'}</span></div>
+        <button class="btn-mini ghost" data-area="all">Semua</button>
+      </div>${secs}`
+  }
   return `${dash}<div class="section-title">Checklist CCU · 15 Aspek</div>${secs}`
 }
 
@@ -2563,6 +2593,18 @@ function onClick(ev) {
   if (areaBtn) {
     setAreaFilter(areaBtn.dataset.area)
     const a = curAudit()
+    if (isCcu(a)) {
+      const its = ccuApplicableItems(a).filter((i) => inArea(i.code, areaFilter))
+      const first = its.find((i) => !getResult(a, i.code).submittedAt) || its[0]
+      currentElementOpen = first ? first.secCode : null
+      searchQuery = ''
+      const si = document.getElementById('searchInput'); if (si) si.value = ''
+      refreshCheckBody()
+      const aq = document.getElementById('areaQuick')
+      if (aq) { aq.innerHTML = ccuAreaQuickHtml(a); const on = aq.querySelector('.aq-opt.on'); if (on) springPop(on) }
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
     // buka elemen pertama yang punya item belum disubmit di area ini
     const first = ALL_ITEMS.find((i) => inArea(i.code, areaFilter) && !getResult(a, i.code).submittedAt) || ALL_ITEMS.find((i) => inArea(i.code, areaFilter))
     currentElementOpen = first ? first.elCode : null
