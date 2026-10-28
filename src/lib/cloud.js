@@ -197,7 +197,7 @@ export async function pushAudit(audit, summary) {
       status: audit.status === 'selesai' ? 'selesai' : 'draft',
       nomor_spbu: audit.info.nomorSpbu || null,
       kota: audit.info.kota || null,
-      tanggal_audit: /^\d{4}-\d{2}-\d{2}$/.test(audit.info.tanggalAudit || '') ? audit.info.tanggalAudit : null,
+      tanggal_audit: /^\d{4}-\d{2}-\d{2}$/.test(audit.info.tanggalAudit || audit.info.tanggalKunjungan || '') ? (audit.info.tanggalAudit || audit.info.tanggalKunjungan) : null,
       data: stripForCloud(audit),
       summary,
       client_updated_at: new Date(audit.updatedAt).toISOString(),

@@ -351,6 +351,9 @@ EV.w = (CW - EV.gap * (EV.cols - 1)) / EV.cols
 EV.rowH = EV.headH + 1.2 + EV.boxH + EV.capH
 
 const pad2 = (n) => String(n).padStart(2, '0')
+const sub = (S, k) => (k === 'f'
+  ? `Item bernilai di bawah A atau berisi catatan auditor, dikelompokkan per ${S.unitLabel || 'elemen Pertamina Way'}`
+  : `Dokumentasi pendukung item yang memenuhi standar, dikelompokkan per ${S.unitLabel || 'elemen Pertamina Way'}`)
 function photoMeta(p) {
   if (!p) return ''
   if (p.source === 'gallery') return 'Galeri (tanpa timestamp)'
@@ -413,13 +416,13 @@ function drawPhotoCell(doc, x, y, cell) {
   doc.setTextColor(0, 0, 0)
 }
 
-function elementBar(doc, y, code, title, n, accent) {
+function elementBar(doc, y, code, title, n, accent, prefix = 'Elemen') {
   doc.setFillColor(...(accent || hex(COLORS.element)))
   doc.rect(M, y, CW, 6, 'F')
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(8.5)
   doc.setTextColor(0, 0, 0)
-  doc.text(pdfText(`Elemen ${code}: ${title}`), M + 2, y + 4.2)
+  doc.text(pdfText(`${prefix} ${code}: ${title}`), M + 2, y + 4.2)
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(7.5)
   doc.text(pdfText(n), PAGE_W - M - 2, y + 4.2, { align: 'right' })
@@ -450,14 +453,13 @@ async function loadCells(cells, loadPhoto) {
 
 async function drawEvidence(state, S, loadPhoto) {
   const doc = state.doc
-  const sub = (k) => (k === 'f' ? 'Item bernilai di bawah A atau berisi catatan auditor, dikelompokkan per elemen Pertamina Way' : 'Dokumentasi pendukung item yang memenuhi standar, dikelompokkan per elemen Pertamina Way')
 
   /* ---- 1) Temuan & Catatan (disorot) ---- */
   state.sectionPages = state.sectionPages || {}
   if (S.findings.length) {
     state.section = 'f'
     newPage(state)
-    sectionHead(state, 'LAMPIRAN TEMUAN & CATATAN', sub('f'), `${S.counts.findingGroups} item · ${S.counts.findingPhotos} foto`)
+    sectionHead(state, 'LAMPIRAN TEMUAN & CATATAN', sub(S, 'f'), `${S.counts.findingGroups} item · ${S.counts.findingPhotos} foto`)
     let num = 0
     for (const el of S.findings) {
       let elDrawn = false
@@ -474,7 +476,7 @@ async function drawEvidence(state, S, loadPhoto) {
         const firstRowH = rows.length ? EV.boxH + EV.capH + 1 : 6
         const need = (elDrawn ? 0 : 8.5) + headH + firstRowH
         if (state.y + need > BOTTOM) newPage(state)
-        if (!elDrawn) { state.y = elementBar(doc, state.y, el.code, el.title, `${el.groups.length} temuan/catatan`, [253, 226, 226]); elDrawn = true }
+        if (!elDrawn) { state.y = elementBar(doc, state.y, el.code, el.title, `${el.groups.length} temuan/catatan`, [253, 226, 226], el.prefix); elDrawn = true }
         // kartu kepala temuan
         const y0 = state.y
         doc.setFillColor(...kind.fill)
@@ -537,7 +539,7 @@ async function drawEvidence(state, S, loadPhoto) {
   if (S.evidence.length) {
     state.section = 'e'
     newPage(state)
-    sectionHead(state, 'LAMPIRAN FOTO EVIDENCE', sub('e'), `${S.counts.evidencePhotos} foto`)
+    sectionHead(state, 'LAMPIRAN FOTO EVIDENCE', sub(S, 'e'), `${S.counts.evidencePhotos} foto`)
     let num = 0
     for (const el of S.evidence) {
       // susun sel: setiap foto satu sel, kelompok mengalir dalam grid 4 kolom
@@ -549,7 +551,7 @@ async function drawEvidence(state, S, loadPhoto) {
       for (const row of rows) {
         const need = (first ? 8.5 : 0) + EV.rowH
         if (state.y + need > BOTTOM) newPage(state)
-        if (first) { state.y = elementBar(doc, state.y, el.code, el.title, `${el.groups.reduce((n, g) => n + g.photos.length, 0)} foto`, [226, 234, 248]); first = false }
+        if (first) { state.y = elementBar(doc, state.y, el.code, el.title, `${el.groups.reduce((n, g) => n + g.photos.length, 0)} foto`, [226, 234, 248], el.prefix); first = false }
         // header kelompok untuk tiap rangkaian sel yang berurutan
         let k = 0
         while (k < row.length) {
@@ -690,6 +692,194 @@ export async function createTeraPdf(R, { loadPhoto = null } = {}) {
   })
   if (loadPhoto && T.photos.length) await drawPhotos(state, { photos: T.photos }, loadPhoto)
   drawFooters(doc, R, await sha256Short(R.fingerprint + '|tera'))
+  return doc
+}
+
+/* =====================================================================
+   CROSS CHECK UP (CCU) — format mengikuti Excel "Checklist CCU" + "Rekap Score"
+   ===================================================================== */
+const CCU_COL = { gold: [255, 192, 0], orange: [197, 90, 17], blue: [47, 84, 150], note: [0, 112, 192], part: [252, 228, 214], group: [237, 237, 237] }
+const STATUS_COL = { Excellent: [11, 83, 148], Good: [56, 118, 29], Average: [0, 150, 160], Poor: [230, 145, 56], Warning: [204, 0, 0] }
+
+function ccuSectionTable(doc, y, sec, withBar) {
+  let start = y
+  if (withBar) {
+    doc.setFillColor(...CCU_COL.gold)
+    doc.rect(M, y, CW - 34, 7, 'F')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9.5)
+    doc.setTextColor(0, 0, 0)
+    doc.text(fitText(doc, `${sec.code}. ${sec.title}`, CW - 38), M + 2, y + 4.8)
+    doc.setFillColor(...CCU_COL.orange)
+    doc.rect(PAGE_W - M - 34, y, 34, 7, 'F')
+    doc.setTextColor(255, 255, 255)
+    doc.text(`SCORE ${sec.score.toFixed(2)}`, PAGE_W - M - 17, y + 4.8, { align: 'center' })
+    doc.setTextColor(0, 0, 0)
+    start = y + 7
+  }
+  const body = sec.rows.map((r) => {
+    if (r.kind === 'part') return [{ content: pdfText(r.desc), colSpan: 4, styles: { fontStyle: 'bold', fillColor: CCU_COL.part } }, { content: r.score === null ? '' : `Score ${r.score.toFixed(2)}`, colSpan: 2, styles: { fontStyle: 'bold', fillColor: CCU_COL.part, halign: 'right' } }]
+    if (r.kind === 'group') return [{ content: pdfText(r.desc), colSpan: 6, styles: { fontStyle: 'bold', fillColor: CCU_COL.group } }]
+    const gcol = COLORS.grade[r.grade] ? hex(COLORS.grade[r.grade]) : [255, 255, 255]
+    if (r.kind === 'toggle') return [{ content: '', styles: { fillColor: [255, 249, 230] } }, { content: pdfText(r.desc), styles: { fontStyle: 'italic', fillColor: [255, 249, 230] } }, { content: 'A/F', styles: { halign: 'center', fillColor: [255, 249, 230] } }, { content: r.grade, styles: { halign: 'center', fontStyle: 'bold', fillColor: gcol } }, { content: '', styles: { fillColor: [255, 249, 230] } }, { content: pdfText(r.note), styles: { fillColor: [255, 249, 230] } }]
+    return [
+      { content: String(r.no), styles: { halign: 'center' } },
+      pdfText(r.desc),
+      { content: r.scale, styles: { halign: 'center', fontSize: 7.5 } },
+      { content: r.grade === 'X' ? 'X' : r.grade, styles: { halign: 'center', fontStyle: 'bold', fillColor: gcol } },
+      { content: pdfText(r.ket), styles: { fontSize: 7.2 } },
+      { content: pdfText(r.note), styles: { fontSize: 7.2 } },
+    ]
+  })
+  return table(doc, start, {
+    head: [['No', 'Diskripsi Pengecekan', 'Scoring', 'Score', 'Keterangan', 'Catatan']],
+    body,
+    headStyles: { fillColor: CCU_COL.blue, fontSize: 8 },
+    styles: { fontSize: 8, cellPadding: 1.4 },
+    columnStyles: { 0: { cellWidth: 9 }, 1: { cellWidth: 86 }, 2: { cellWidth: 15 }, 3: { cellWidth: 12 }, 4: { cellWidth: 24 }, 5: { cellWidth: CW - 146 } },
+    showHead: 'everyPage',
+  })
+}
+
+function numberedBlock(state, title, items, emptyText) {
+  block(state, (doc, y) => {
+    doc.setFillColor(...CCU_COL.note)
+    doc.rect(M, y, CW, 7, 'F')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9.5)
+    doc.setTextColor(255, 255, 255)
+    doc.text(pdfText(title), M + 2, y + 4.8)
+    doc.setTextColor(0, 0, 0)
+    return table(doc, y + 7, {
+      body: items.length ? items.map((t, k) => [{ content: String(k + 1) + '.', styles: { halign: 'right' } }, pdfText(t)]) : [[{ content: emptyText, colSpan: 2, styles: { fontStyle: 'italic', textColor: [120, 120, 120] } }]],
+      styles: { fontSize: 8.5 },
+      columnStyles: { 0: { cellWidth: 9 }, 1: { cellWidth: CW - 9 } },
+    })
+  })
+}
+
+export async function createCcuPdf(R, { loadPhoto = null, includePhotos = true } = {}) {
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
+  doc.setProperties({ title: `CCU ${R.reportNo}`, subject: 'Laporan Cross Check Up SPBU', creator: 'Task Force Audit SPBU' })
+  const state = { doc, y: TOP, splitGroups: [], sectionPages: {} }
+
+  // Kepala formulir
+  block(state, (d, y) => {
+    d.setFillColor(...hex(COLORS.navy))
+    d.rect(M, y, CW, 17, 'F')
+    d.setTextColor(255, 255, 255)
+    d.setFont('helvetica', 'bold')
+    d.setFontSize(11)
+    d.text('STANDART CHECKLIST', PAGE_W / 2, y + 5, { align: 'center' })
+    d.setFontSize(12.5)
+    d.text('CROSS CHECK UP (CCU) SPBU COCO', PAGE_W / 2, y + 10.4, { align: 'center' })
+    d.setFontSize(9)
+    d.text(pdfText(R.unit), PAGE_W / 2, y + 15, { align: 'center' })
+    d.setTextColor(0, 0, 0)
+    d.setFont('helvetica', 'normal')
+    d.setFontSize(7.5)
+    d.text(pdfText(R.formCode), PAGE_W - M, y + 21, { align: 'right' })
+    d.text(pdfText(`No. Report ${R.reportNo}`), M, y + 21)
+    return y + 23
+  }, 1)
+  // Informasi kunjungan + Total Score / Status
+  block(state, (d, y) => {
+    const end = table(d, y, {
+      body: R.infoRows.map((r) => r.map(pdfText)),
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 30 }, 1: { cellWidth: 52 }, 2: { fontStyle: 'bold', cellWidth: 34 }, 3: { cellWidth: CW - 116 - 46 } },
+      margin: { left: M, right: M + 46 },
+      styles: { fontSize: 8.5 },
+    })
+    const col = STATUS_COL[R.status] || STATUS_COL.Warning
+    const h = end - y
+    d.setFillColor(...col)
+    d.rect(PAGE_W - M - 44, y, 44, h, 'F')
+    d.setTextColor(255, 255, 255)
+    d.setFont('helvetica', 'bold')
+    d.setFontSize(8)
+    d.text('TOTAL SCORE', PAGE_W - M - 22, y + 5, { align: 'center' })
+    d.setFontSize(20)
+    d.text(R.ts.toFixed(2), PAGE_W - M - 22, y + h / 2 + 3, { align: 'center' })
+    d.setFontSize(9)
+    d.text(`Status: ${R.status}`, PAGE_W - M - 22, y + h - 3, { align: 'center' })
+    d.setTextColor(0, 0, 0)
+    d.setFont('helvetica', 'italic')
+    d.setFontSize(7.5)
+    d.text('Formulir Standart Checklist Program CCU wajib di isi sesuai dengan kondisi yang sebenarnya', M, end + 4)
+    return end + 6
+  })
+  // Rekap Score (sheet Rekap Score)
+  block(state, (d, y) => {
+    const start = sectionBar(d, y, 'REKAP SCORE CROSS CHECK UP')
+    return table(d, start, {
+      head: [['No', 'Item Penilaian', 'Jumlah', 'Nilai', 'Bobot', 'Score']],
+      body: [
+        ...R.rekap.map((x) => [
+          { content: String(x.no), styles: { halign: 'center' } },
+          pdfText(x.title),
+          { content: String(x.jumlah), styles: { halign: 'center' } },
+          { content: x.nilai.toFixed(2), styles: { halign: 'center', fillColor: STATUS_COL[x.nilai <= 35 ? 'Warning' : x.nilai <= 60 ? 'Poor' : x.nilai <= 80 ? 'Average' : x.nilai <= 95 ? 'Good' : 'Excellent'].map((c) => Math.round(c + (255 - c) * 0.72)) } },
+          { content: `${Math.round(x.bobot * 100)}%`, styles: { halign: 'center' } },
+          { content: x.skor.toFixed(2), styles: { halign: 'center' } },
+        ]),
+        [{ content: 'TOTAL SCORE', colSpan: 4, styles: { fontStyle: 'bold', fillColor: hex(COLORS.total) } }, { content: '100%', styles: { halign: 'center', fontStyle: 'bold', fillColor: hex(COLORS.total) } }, { content: R.ts.toFixed(2), styles: { halign: 'center', fontStyle: 'bold', fillColor: hex(COLORS.total) } }],
+        [{ content: 'STATUS', colSpan: 4, styles: { fontStyle: 'bold' } }, { content: R.status, colSpan: 2, styles: { halign: 'center', fontStyle: 'bold', textColor: [255, 255, 255], fillColor: STATUS_COL[R.status] } }],
+      ],
+      columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 100 }, 2: { cellWidth: 18 }, 3: { cellWidth: 20 }, 4: { cellWidth: 18 }, 5: { cellWidth: CW - 166 } },
+    })
+  })
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(7)
+  doc.setTextColor(128, 128, 128)
+  const fn = doc.splitTextToSize(pdfText('Skor aspek = Σ(bobot item × nilai) / (Σbobot − bobot item X) × Σbobot · A=1 B=0,8 C=0,6 D=0,4 E=0,2 F=0 X=N/A · Status: <=35 Warning, <=60 Poor, <=80 Average, <=95 Good, >95 Excellent'), CW)
+  doc.text(fn, M, state.y + 1)
+  doc.setTextColor(0, 0, 0)
+  state.y += 2 + fn.length * 3
+
+  // Checklist per aspek
+  newPage(state)
+  R.sections.forEach((sec) => {
+    const draw = (d, y) => ccuSectionTable(d, y, sec, true)
+    const h = measure(draw)
+    if (state.y + Math.min(h, 60) > BOTTOM || (h < BOTTOM - TOP && state.y + h > BOTTOM && state.y > TOP + 0.5)) newPage(state)
+    state.y = draw(doc, state.y) + 4
+  })
+
+  // Catatan, rekomendasi, informasi umum & approval
+  numberedBlock(state, 'CATATAN ATAS TEMUAN DI LAPANGAN', R.catatan, 'Tidak ada temuan.')
+  numberedBlock(state, 'REKOMENDASI TINDAK LANJUT ATAS TEMUAN', R.rekomendasi, '-')
+  block(state, (d, y) => {
+    const end = table(d, y, {
+      head: [['Informasi Umum', 'Approval']],
+      body: [[
+        { content: pdfText(R.infoUmum.map((t, k) => `${k + 1}. ${t}`).join('\n')), styles: { fontSize: 7.5, valign: 'top' } },
+        { content: '', styles: { minCellHeight: 34 } },
+      ]],
+      columnStyles: { 0: { cellWidth: CW * 0.46 }, 1: { cellWidth: CW * 0.54 } },
+      didDrawCell: (data) => {
+        if (data.section !== 'body' || data.column.index !== 1) return
+        const { x, y: cy, width, height } = data.cell
+        const w3 = width / 3
+        R.approval.forEach(([role, name], k) => {
+          const cx = x + w3 * k + w3 / 2
+          d.setFont('helvetica', 'bold')
+          d.setFontSize(7.5)
+          d.text(pdfText(role), cx, cy + 5, { align: 'center' })
+          d.setDrawColor(150, 150, 150)
+          d.line(x + w3 * k + 3, cy + height - 8, x + w3 * (k + 1) - 3, cy + height - 8)
+          d.setFont('helvetica', 'normal')
+          d.text(fitText(d, name === '-' ? '(..................)' : name, w3 - 4), cx, cy + height - 4, { align: 'center' })
+        })
+      },
+    })
+    return end
+  })
+
+  if (includePhotos && loadPhoto) {
+    await drawEvidence(state, { ...R.photoSections, unitLabel: 'aspek CCU' }, loadPhoto)
+    drawSectionMarks(doc, state.sectionPages)
+  }
+  drawFooters(doc, { reportNo: `${R.reportNo} · CCU` }, await sha256Short(R.fingerprint))
   return doc
 }
 

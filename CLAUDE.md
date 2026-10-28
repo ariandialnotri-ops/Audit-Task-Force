@@ -32,6 +32,14 @@ Aplikasi audit SPBU Pertamina Way (standar "Pasti Pas"). Auditor mengisi checkli
 - Pembaruan aplikasi: setelah deploy, nama chunk (mis. `assets/pdf-XXXX.js`) berganti. `loadPdfModule()` memuat modul PDF di latar setelah login; bila impor dinamis gagal karena file lama hilang (`isChunkError`), `reloadForUpdate()` menyimpan tindakan tertunda di `sessionStorage` (`tfa_resume`), memuat ulang sekali, lalu `resumePendingAction()` melanjutkannya (mis. unduh PDF). `index.html` dikirim `Cache-Control: no-cache` (`public/_headers`).
 - Deploy aplikasi web: Cloudflare Workers static assets (`wrangler.jsonc` di root, nama `task-force-audit-app`, header di `public/_headers`) atau Vercel (`vercel.json`). Jangan beri nama `audit-task-force` — itu Worker API.
 
+## Modul Cross Check Up (CCU) SPBU COCO
+
+- Audit kedua berjenis `audit.type === 'ccu'` (dipilih di modal **Pilih Jenis Audit**). Sumber: `Checklist_Program_CCU_SPBU_COCO - Versi 3.0 2024.xlsx` (formulir F12/CCU-SPBU/R1/2024; tidak disimpan di repo).
+- `src/data/ccu.js` — DIBUAT dari Excel: 15 aspek (`bobot` dari sheet Rekap Score, total 1,00), 158 item (`desc`, `scale` A/F · A/C/F · A/C/F/X · A-F, `weight`, `ket`). XIV Bright Store punya `parts` XIV.1–3 + `toggle`; XV Subsidi Tepat punya `toggle`; XIII `formula: 'sum'`.
+- `src/lib/ccu.js` — `computeCcu()` meniru rumus Excel: skor aspek = Σvalue/(Σbobot − Σbobot X)×Σbobot (item belum dinilai = 0); XIII = Σvalue; XIV = rata-rata 3 part + toggle (tidak ada Bright Store → 100); XV toggle ikut Σ (tidak ada JBT → 100); TS = Σ skor×bobot; status AG5. Diuji di `tests/ccu.test.js`.
+- `src/lib/ccu-report.js` — `buildCcuReport()` (info kunjungan, rekap, tabel per aspek, catatan temuan otomatis + `info.catatanTemuan`, `info.rekomendasi`, approval Pengawas/ABH/ABH Observer, `photoSections` per **Aspek**). PDF: `createCcuPdf()` di pdf.js (bar aspek kuning FFC000 + skor oranye C55A11, header tabel biru 2F5496, Rekap Score, catatan biru 0070C0, Informasi Umum + Approval, lalu `drawEvidence`).
+- main.js memakai `isCcu(a)`, `itemDef(code)`, `auditSummary(a)`, `reportFor(a)` agar kartu item, foto/galeri, catatan, Submit→Edit, Submit Data, sinkron cloud & ZIP foto sama dengan audit Pertamina Way. Info CCU: `namaSpbu, nomorSpbu, kota, namaAbh, abhObserver, pengawas, tanggalKunjungan, waktuKunjungan, adaBrightStore, adaJbt, catatanTemuan, rekomendasi`.
+
 ## Model data
 
 ```js

@@ -47,6 +47,12 @@ Gaya visual mengikuti design system **AeroShift SPBU** (lihat `DESIGN.md`) — i
 
 ## Fitur
 
+**Baru di v3.7 — Modul Cross Check Up (CCU) SPBU COCO**
+- **+ Mulai Audit Baru** → pilih *Audit Pertamina Way* atau *Cross Check Up (CCU)*.
+- CCU: 158 item / 15 aspek dari formulir Excel F12/CCU-SPBU/R1/2024 (5R, HSSE, IT, Technical, Keuangan, Marketing, HR, Operasional, Legal, Asset, Customer Focus, Risk Management, Digital Campaign, Bright Store, Subsidi Tepat); bobot & rumus skor sama persis dengan Excel, status Warning/Poor/Average/Good/Excellent.
+- Fitur sama dengan audit Pertamina Way: nilai sesuai skala, foto kamera/galeri, catatan, Submit → Edit, pencarian, Submit Data + animasi sidik jari, sinkron cloud, ZIP foto.
+- Laporan PDF CCU mengikuti formulir Excel (kepala formulir, Rekap Score, checklist per aspek, catatan temuan, rekomendasi, informasi umum & approval) + Lampiran Temuan & Catatan dan Lampiran Foto Evidence per aspek.
+
 **Baru di v3.6**
 - Form **Data Ketenagakerjaan**: foto bukti upah / slip gaji / BPJS (kamera atau galeri), masuk lampiran Elemen 1.
 - Lampiran laporan (PDF & aplikasi) disusun per elemen Pertamina Way dalam grid rapi: **Lampiran Temuan & Catatan** (disorot, lengkap dengan nilai, deskripsi item & catatan auditor) dipisah dari **Lampiran Foto Evidence** (item yang memenuhi standar).

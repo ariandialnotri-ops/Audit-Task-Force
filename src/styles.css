@@ -823,3 +823,27 @@ body.landing-mode .content{padding-bottom:24px;}
 .ev-desc{font-family:var(--font-ui);font-size:12.5px;line-height:1.45;margin:6px 0;}
 .ev-note{font-family:var(--font-ui);font-size:12.5px;font-weight:700;line-height:1.45;color:#B91C1C;background:#fff;border-radius:8px;padding:7px 9px;margin-bottom:8px;}
 .ev-find.catatan .ev-note{color:#92400E;}
+
+/* =========================================================
+   v3.7 — modul Cross Check Up (CCU)
+   ========================================================= */
+.type-tag{display:inline-block;padding:2px 7px;border-radius:6px;font-family:var(--font-mono);font-size:10px;font-weight:800;color:#fff;background:var(--primary);vertical-align:1px;}
+.type-tag.ccu{background:#C55A11;}
+.type-tag.sm{font-size:8.5px;padding:1px 5px;margin-left:6px;}
+.type-opt{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:10px;align-items:center;width:100%;text-align:left;border:1px solid rgba(0,80,203,0.18);background:rgba(255,255,255,0.8);border-radius:16px;padding:14px;margin-bottom:10px;cursor:pointer;font-family:var(--font-ui);color:var(--text);position:relative;overflow:hidden;}
+.type-opt .type-tag{grid-row:1 / span 2;font-size:12px;padding:8px 9px;border-radius:10px;}
+.type-opt b{font-size:15px;}
+.type-opt small{font-size:12px;color:var(--muted);}
+.type-opt:active{transform:scale(.98);}
+.ccu-idx{background:linear-gradient(180deg,#E67E22,#C55A11)!important;font-size:11px!important;}
+.ccu-part{color:#C55A11;}
+.ccu-dash{display:grid;grid-template-columns:1.2fr 1fr;gap:10px;margin-bottom:6px;}
+.ccu-dash-ts{border-radius:16px;color:#fff;padding:12px 14px;display:flex;flex-direction:column;box-shadow:0 10px 24px -12px rgba(0,0,0,0.35);}
+.ccu-dash-ts span{font-family:var(--font-ui);font-size:10.5px;font-weight:800;letter-spacing:.05em;opacity:.9;}
+.ccu-dash-ts b{font-family:var(--font-mono);font-size:28px;line-height:1.15;}
+.ccu-dash-ts small{font-family:var(--font-ui);font-size:12px;font-weight:700;}
+.ccu-dash-meta{display:grid;gap:8px;}
+.ccu-dash-meta div{background:rgba(255,255,255,0.75);border:1px solid rgba(255,255,255,0.9);border-radius:14px;padding:8px 12px;display:flex;flex-direction:column;}
+.ccu-dash-meta b{font-family:var(--font-mono);font-size:17px;}
+.ccu-dash-meta span{font-family:var(--font-ui);font-size:11px;color:var(--muted);}
+.report-table td.t{font-family:var(--font-ui);font-size:12px;}

@@ -16,6 +16,9 @@ import { thumbSrc, fullUrl, storeNewPhoto, removePhotoFiles, migrateAuditPhotos,
 import { buildReport, fmtPct, fmtSkor } from './lib/report.js'
 import { LOGO_MARK, LOGO_FULL, APP_NAME } from './assets/logo-mark.js'
 import { AREAS, itemArea, inArea } from './data/area.js'
+import { CCU_SECTIONS } from './data/ccu.js'
+import { CCU_ITEMS, CCU_BY_CODE, computeCcu, ccuSkipped, ccuApplicableItems } from './lib/ccu.js'
+import { buildCcuReport } from './lib/ccu-report.js'
 
 /* =========================================================
    STATE
@@ -64,6 +67,11 @@ function defaultInfo() {
 
 /** Lengkapi audit lama (v1) dengan field baru. */
 function normalizeAudit(a) {
+  if (isCcu(a)) {
+    a.info = { ...ccuDefaultInfo(), ...(a.info || {}) }
+    a.results = a.results || {}
+    return a
+  }
   a.info = { ...defaultInfo(), ...(a.info || {}) }
   const i = a.info
   if (!i.areaBusinessHead && i.namaManager) i.areaBusinessHead = i.namaManager
@@ -94,8 +102,26 @@ function currentUserName() {
   return u ? (u.nama || u.email || '') : ''
 }
 
-function newAudit() {
+function ccuDefaultInfo() {
+  const d = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  return {
+    namaSpbu: '', nomorSpbu: '', kota: '', namaAbh: '', abhObserver: '', pengawas: '',
+    tanggalKunjungan: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+    waktuKunjungan: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+    adaBrightStore: true, adaJbt: true, catatanTemuan: '', rekomendasi: '',
+  }
+}
+
+function newAudit(type = 'pw') {
   const id = uid()
+  if (type === 'ccu') {
+    const info = ccuDefaultInfo()
+    info.abhObserver = currentUserName()
+    AUDITS[id] = { id, type: 'ccu', version: 1, createdAt: Date.now(), updatedAt: Date.now(), status: 'draft', info, results: {} }
+    persist(id)
+    return id
+  }
   const info = defaultInfo()
   info.auditors = [currentUserName()]
   AUDITS[id] = { id, version: 3, createdAt: Date.now(), updatedAt: Date.now(), status: 'draft', info, results: {} }
@@ -148,6 +174,25 @@ function classificationBadge(cls) {
   if (cls === 'good') return { text: 'PASTI PAS GOOD!', bg: 'linear-gradient(135deg,#10B981,#006645)' }
   return { text: 'BELUM MEMENUHI PASTI PAS', bg: 'linear-gradient(135deg,#EF4444,#BA1A1A)' }
 }
+/* ----- Jenis audit: Pertamina Way (default) atau Cross Check Up (CCU) ----- */
+const isCcu = (a) => !!a && a.type === 'ccu'
+function itemDef(code, a = curAudit()) {
+  return isCcu(a) ? CCU_BY_CODE[code] : ITEM_BY_CODE[code]
+}
+function reportFor(a) {
+  return isCcu(a) ? buildCcuReport(a) : buildReport(a)
+}
+const CCU_STATUS_COLOR = { Excellent: '#0050CB', Good: '#10B981', Average: '#00C2B8', Poor: '#F59E0B', Warning: '#EF4444' }
+/** Ringkasan seragam untuk progres, riwayat, tombol Submit Data & sinkron. */
+function auditSummary(a) {
+  if (isCcu(a)) {
+    const c = computeCcu(a)
+    return { ts: c.ts, totalItems: c.totalItems, totalSubmitted: c.totalSubmitted, totalGraded: c.totalGraded, label: c.status, color: CCU_STATUS_COLOR[c.status], findings: c.findings, ccu: c }
+  }
+  const c = computeAudit(a)
+  return { ts: c.ts, totalItems: c.totalItems, totalSubmitted: c.totalSubmitted, totalGraded: c.totalGraded, label: clsLabel(c.classification), color: complianceBand(c.ts / 100).color, findings: c.failedPinalti.length, comp: c }
+}
+
 function clsLabel(cls) {
   return cls === 'excellent' ? 'Pasti Pas Excellent' : cls === 'good' ? 'Pasti Pas Good' : 'Belum Lulus'
 }
@@ -253,9 +298,9 @@ function render() {
   renderTopbar()
   if (currentView === 'home') { c.innerHTML = viewHome(); indexLogoParts() }
   else if (currentView === 'history') c.innerHTML = viewHistory()
-  else if (currentView === 'form') c.innerHTML = viewForm()
+  else if (currentView === 'form') c.innerHTML = isCcu(curAudit()) ? viewCcuForm() : viewForm()
   else if (currentView === 'checklist') c.innerHTML = viewChecklist()
-  else if (currentView === 'report') { c.innerHTML = viewReport(); hydrateFullPhotos() }
+  else if (currentView === 'report') { c.innerHTML = isCcu(curAudit()) ? viewCcuReport() : viewReport(); hydrateFullPhotos() }
   else if (currentView === 'about') c.innerHTML = viewAbout()
   else if (currentView === 'account') c.innerHTML = viewAccount()
 }
@@ -280,7 +325,7 @@ function renderTopbar() {
   if (currentView === 'about') { tb.innerHTML = `<h1 style="text-align:left;flex:1;">Panduan</h1>`; return }
   if (currentView === 'account') { tb.innerHTML = `<h1 style="text-align:left;flex:1;">Akun &amp; Rekap</h1>`; return }
   if (currentView === 'form') {
-    tb.innerHTML = `<button class="back" data-back="home">&#8249; Kembali</button><h1>Data SPBU</h1><span style="width:70px"></span>`
+    tb.innerHTML = `<button class="back" data-back="home">&#8249; Kembali</button><h1>${isCcu(curAudit()) ? 'Data Kunjungan CCU' : 'Data SPBU'}</h1><span style="width:70px"></span>`
     return
   }
   if (currentView === 'checklist') {
@@ -297,6 +342,20 @@ function renderTopbar() {
    VIEW: HOME / HISTORY
    ========================================================= */
 function auditRow(a) {
+  if (isCcu(a)) {
+    const sm = auditSummary(a)
+    return `<div class="card tap" data-open-audit="${a.id}">
+    <div class="audit-item">
+      <div class="audit-badge" style="background:${sm.color}22;color:${sm.color};">${sm.ts.toFixed(0)}</div>
+      <div class="meta">
+        <div class="title">${esc(a.info.nomorSpbu || a.info.namaSpbu || 'SPBU')} &middot; <span class="type-tag ccu">CCU</span></div>
+        <div class="sub">${fmtDate(a.updatedAt)} &middot; Cross Check Up &middot; ${sm.label} &middot; ${sm.totalSubmitted}/${sm.totalItems} submit</div>
+      </div>
+      <span class="pill ${a.status}">${a.status === 'draft' ? 'Draft' : 'Selesai'}</span>
+      <span class="chev">&#8250;</span>
+    </div>
+  </div>`
+  }
   const comp = computeAudit(a)
   const band = complianceBand(comp.ts / 100)
   return `<div class="card tap" data-open-audit="${a.id}">
@@ -322,7 +381,7 @@ function viewHome() {
     <h1>${APP_NAME}</h1>
   </div>
   <div class="cloud-line" data-tab="account">${cloudLineHtml()}</div>
-  <button class="btn-primary" data-action="newaudit" style="margin-bottom:18px;">+ Mulai Audit SPBU Baru</button>
+  <button class="btn-primary" data-action="newaudit" style="margin-bottom:18px;">+ Mulai Audit Baru</button>
 
   <div class="section-title">Audit Terakhir</div>
   ${draftHtml}
@@ -511,11 +570,12 @@ function resizeNozzles(count) {
 
 function enterChecklist() {
   const a = curAudit()
-  const errs = formErrors(a)
+  const errs = isCcu(a) ? ccuFormErrors(a) : formErrors(a)
   if (errs.length) {
     showModal(`<h3>Lengkapi Data Dulu</h3><p class="modal-p">Data berikut wajib diisi sebelum checklist:</p><ul class="modal-list">${errs.map((e) => `<li>${esc(e)}</li>`).join('')}</ul><button class="btn-primary" data-close>Oke</button>`)
     return
   }
+  if (isCcu(a)) { go('checklist', { auditId: a.id }); return }
   const first = !a.pinaltiPromptShown
   go('checklist', { auditId: a.id })
   if (first) {
@@ -816,7 +876,7 @@ function itemCardHtml(a, it, opts = {}) {
 function patchItem(code) {
   const a = curAudit()
   const r = getResult(a, code)
-  const it = ITEM_BY_CODE[code]
+  const it = itemDef(code, a)
   document.querySelectorAll(attrSel('data-graderow', code)).forEach((el) => { el.innerHTML = gradeRowHtml(it, r) })
   document.querySelectorAll(attrSel('data-status', code)).forEach((el) => { el.innerHTML = statusChip(r) })
   document.querySelectorAll(attrSel('data-autohint', code)).forEach((el) => { el.innerHTML = autoHintHtml(a, code) })
@@ -857,9 +917,9 @@ function patchItem(code) {
 /** Render ulang seluruh kartu item (mis. setelah Submit/Edit). */
 function rerenderCard(code) {
   const a = curAudit()
-  const it = ITEM_BY_CODE[code]
+  const it = itemDef(code, a)
   document.querySelectorAll(attrSel('data-item', code)).forEach((el) => {
-    el.outerHTML = itemCardHtml(a, it, { breadcrumb: el.dataset.crumb === '1' })
+    el.outerHTML = isCcu(a) ? ccuItemCardHtml(a, it, { breadcrumb: el.dataset.crumb === '1' }) : itemCardHtml(a, it, { breadcrumb: el.dataset.crumb === '1' })
   })
   patchProgress()
 }
@@ -879,6 +939,8 @@ function patchProgress() {
   if (pd) pd.innerHTML = pinaltiDashHtml()
   const fab = document.getElementById('reportFab')
   if (fab) fab.innerHTML = reportFabHtml()
+  const cd = document.getElementById('ccuDash')
+  if (cd && isCcu(curAudit())) cd.innerHTML = ccuDashInner(computeCcu(curAudit()))
   const sd = document.getElementById('submitDataSlot')
   if (sd) {
     const prev = sd.firstElementChild && sd.firstElementChild.className
@@ -896,10 +958,10 @@ function applyAutoGrade(code) {
 
 function progressHtml() {
   const a = curAudit()
-  const comp = computeAudit(a)
+  const comp = auditSummary(a)
   const pct = comp.totalItems ? (comp.totalSubmitted / comp.totalItems * 100) : 0
   return `
-    <div class="pg-row"><span><b>${comp.totalSubmitted}/${comp.totalItems}</b> tersubmit <span id="saveState" class="save-state">✓ tersimpan</span></span><span>TS <b>${comp.ts.toFixed(2)}</b> &middot; ${clsLabel(comp.classification)}</span></div>
+    <div class="pg-row"><span><b>${comp.totalSubmitted}/${comp.totalItems}</b> tersubmit <span id="saveState" class="save-state">✓ tersimpan</span></span><span>${isCcu(a) ? 'CCU' : 'TS'} <b>${comp.ts.toFixed(2)}</b> &middot; ${comp.label}</span></div>
     <div class="progress-track slim"><div class="progress-fill" style="width:${pct}%"></div></div>`
 }
 
@@ -1018,6 +1080,7 @@ function areaSwitchHtml(a) {
 
 function checkBodyHtml() {
   const a = curAudit()
+  if (isCcu(a)) return ccuBodyHtml(a)
   if (searchQuery.trim()) return searchResultsHtml(a)
   if (pinaltiFilter) return pinaltiViewHtml(a)
   return `
@@ -1033,7 +1096,7 @@ function viewChecklist() {
   return `
   <div class="search-dock"><div class="search-bar">
     ${iconSearch}
-    <input id="searchInput" type="search" autocomplete="off" placeholder="Cari item… cth. APAR, toilet, density" value="${esc(searchQuery)}">
+    <input id="searchInput" type="search" autocomplete="off" placeholder="${isCcu(curAudit()) ? 'Cari item CCU… cth. APAR, 5R, Bright Store' : 'Cari item… cth. APAR, toilet, density'}" value="${esc(searchQuery)}">
     ${searchQuery ? `<button class="search-clear" data-action="clearsearch" aria-label="Hapus pencarian">&times;</button>` : ''}
   </div><div class="top-progress" id="progressBox">${progressHtml()}</div></div>
   <div id="checkBody">${checkBodyHtml()}</div>
@@ -1054,7 +1117,7 @@ function refreshCheckBody() {
 function validateItem(a, code) {
   const r = getResult(a, code)
   const errs = []
-  const it = ITEM_BY_CODE[code]
+  const it = itemDef(code, a)
   if (!r.grade) errs.push(`Pilih nilai (skala ${scaleLabel(it)}) terlebih dahulu.`)
   else if (r.grade === 'X' ? !it.allowNA : !it.allowed.includes(r.grade)) errs.push(`Nilai ${r.grade === 'X' ? 'N/A' : r.grade} tidak sesuai skala item ini (${scaleLabel(it)}).`)
   if (r.grade && r.grade !== 'X') {
@@ -1121,7 +1184,7 @@ const iconCheck = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 
 /** Status tombol Submit Data: 'todo' (masih ada item) | 'ready' (siap kirim) | 'done' (sudah terkirim). */
 function submitState(a) {
-  const comp = computeAudit(a)
+  const comp = auditSummary(a)
   const left = comp.totalItems - comp.totalSubmitted
   if (left > 0) return { state: 'todo', left }
   return { state: a.status === 'selesai' ? 'done' : 'ready', left: 0 }
@@ -1154,10 +1217,10 @@ function setAreaFilter(id) {
 }
 
 function jumpToItem(code) {
-  const it = ITEM_BY_CODE[code]
+  const it = itemDef(code)
   if (!it) return
-  searchQuery = ''; pinaltiFilter = null; currentElementOpen = it.elCode
-  if (!inArea(code, areaFilter)) setAreaFilter('all')
+  searchQuery = ''; pinaltiFilter = null; currentElementOpen = isCcu(curAudit()) ? it.secCode : it.elCode
+  if (!isCcu(curAudit()) && !inArea(code, areaFilter)) setAreaFilter('all')
   render()
   const card = document.getElementById('item-' + it.code.replace(/\./g, '_'))
   if (card) { card.scrollIntoView({ block: 'center', behavior: 'smooth' }); card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 1600) }
@@ -1169,6 +1232,12 @@ function onSubmitData() {
   const { state, left } = submitState(a)
   if (state === 'done') { go('report', { auditId: a.id }); return }
   if (state === 'ready') { submitReport(); return }
+  if (isCcu(a)) {
+    const nx = ccuApplicableItems(a).find((it) => !getResult(a, it.code).submittedAt)
+    showToast(`Masih ${left} item belum disubmit — menuju ${nx.code}`, 2600)
+    jumpToItem(nx.code)
+    return
+  }
   let next = ALL_ITEMS.find((it) => !getResult(a, it.code).submittedAt && inArea(it.code, areaFilter))
   if (!next) {
     next = ALL_ITEMS.find((it) => !getResult(a, it.code).submittedAt)
@@ -1179,17 +1248,20 @@ function onSubmitData() {
 }
 
 function reportNumber(a) {
+  if (isCcu(a)) return `CCU/${a.info.nomorSpbu || 'SPBU'}/${(a.id.replace(/[^a-z0-9]/gi, '').slice(-4) || '0000').toUpperCase()}`
   const code = (a.id.replace(/[^a-z0-9]/gi, '').slice(-4) || '0000').toUpperCase()
   return `PW/${a.info.nomorSpbu || 'SPBU'}/${code}`
 }
 
 async function submitReport() {
   const a = curAudit()
-  const comp = computeAudit(a)
+  const comp = auditSummary(a)
   if (comp.totalSubmitted < comp.totalItems) { showToast('Masih ada item yang belum disubmit'); return }
   const root = document.getElementById('modalRoot')
   const wait = (ms) => new Promise((r) => setTimeout(r, ms))
-  const steps = ['Memeriksa 125 item checklist', 'Menghitung Total Score & klasifikasi', 'Memvalidasi item pinalti', cloud.role ? 'Menyimpan & sinkron ke cloud' : 'Menyimpan di perangkat']
+  const steps = isCcu(a)
+    ? [`Memeriksa ${comp.totalItems} item Cross Check Up`, 'Menghitung skor 15 aspek CCU', 'Merekap Total Score & status', cloud.role ? 'Menyimpan & sinkron ke cloud' : 'Menyimpan di perangkat']
+    : ['Memeriksa 125 item checklist', 'Menghitung Total Score & klasifikasi', 'Memvalidasi item pinalti', cloud.role ? 'Menyimpan & sinkron ke cloud' : 'Menyimpan di perangkat']
 
   // 1) Verifikasi sidik jari (motion referensi Stitch SPBU)
   root.innerHTML = `<div class="submit-overlay" role="alertdialog" aria-live="polite" aria-label="Submit data">
@@ -1219,7 +1291,7 @@ async function submitReport() {
     const mark = (k, st) => { const li = overlay.querySelector(`[data-step="${k}"]`); if (li) li.className = st }
     mark(0, 'run'); await wait(500); mark(0, 'ok')
     mark(1, 'run'); await wait(500); mark(1, 'ok')
-    mark(2, 'run'); await wait(420); mark(2, comp.failedPinalti.length ? 'warn' : 'ok')
+    mark(2, 'run'); await wait(420); mark(2, comp.findings ? 'warn' : 'ok')
     mark(3, 'run')
     a.status = 'selesai'
     a.reportSubmittedAt = Date.now()
@@ -1235,16 +1307,18 @@ async function submitReport() {
     await wait(900)
 
     // 3) Pop-up selesai + unduh PDF
-    const badge = classificationBadge(comp.classification)
+    const hasil = isCcu(a)
+      ? { text: `${comp.label.toUpperCase()}`, color: comp.color }
+      : { text: classificationBadge(comp.comp.classification).text, color: { excellent: '#0050CB', good: '#047857' }[comp.comp.classification] || '#BA1A1A' }
     const card = overlay.querySelector('.submit-card')
     card.outerHTML = `<div class="done-card">
       <div class="done-ico">${iconCheck}</div>
       <h3>Data Tersubmit!</h3>
-      <p>Laporan audit SPBU ${esc(a.info.nomorSpbu || '-')} tersimpan${synced ? ' dan tersinkron ke cloud' : cloud.role ? ' di perangkat (sinkron otomatis saat online)' : ''}.</p>
+      <p>Laporan ${isCcu(a) ? 'Cross Check Up' : 'audit'} SPBU ${esc(a.info.nomorSpbu || '-')} tersimpan${synced ? ' dan tersinkron ke cloud' : cloud.role ? ' di perangkat (sinkron otomatis saat online)' : ''}.</p>
       <div class="done-meta">
         <div><span>NO. REPORT</span><b>${esc(a.reportNo)}</b></div>
         <div><span>TOTAL SCORE</span><b>${comp.ts.toFixed(2)}</b></div>
-        <div><span>HASIL</span><b style="color:${{ excellent: '#0050CB', good: '#047857' }[comp.classification] || '#BA1A1A'}">${esc(badge.text)}</b></div>
+        <div><span>${isCcu(a) ? 'STATUS' : 'HASIL'}</span><b style="color:${hasil.color}">${esc(hasil.text)}</b></div>
       </div>
       <button class="btn-primary done-pdf" data-action="donepdf">${iconUpload.replace('M12 15V4', 'M12 4v11').replace('m7 9 5-5 5 5', 'm7 10 5 5 5-5')} Unduh Laporan PDF</button>
       <button class="btn-secondary" data-action="doneview">Lihat Laporan</button>
@@ -1297,7 +1371,7 @@ async function openPhotoViewer(key) {
     photo = (a.info.fotoUpah || [])[+parts[1]]
     caption = 'Data upah & ketenagakerjaan'
   } else if (parts[0] === 'id') {
-    const hit = buildReport(a).photos.find((x) => x.photo && x.photo.id === parts[1])
+    const hit = reportFor(a).photos.find((x) => x.photo && x.photo.id === parts[1])
     if (hit) { photo = hit.photo; caption = hit.caption }
   }
   if (!photo) return
@@ -1333,6 +1407,27 @@ function reportTable(head, rows) {
   return `<div class="table-scroll"><table class="report-table"><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr>${rows.join('')}</table></div>`
 }
 
+/** Lampiran foto: Temuan & Catatan (disorot) lalu Evidence, per elemen/aspek. */
+function photoSectionsHtml(S) {
+  const tile = ({ photo: p, caption }) => `<div class="ev-tile" data-viewphoto="id|${esc(p.id || '')}"><div class="ev-img"><img src="${thumbSrc(p)}" data-full="${esc(p.id || '')}" alt="" loading="lazy"></div>
+    <b>${esc(caption)}</b><small>${p.source === 'gallery' ? 'Galeri' : `${p.ts ? esc(formatStampTime(p.ts)) : ''}${p.code ? ' · ' + esc(p.code) : ''}`}</small></div>`
+  let fNum = 0
+  let eNum = 0
+  const findingsHtml = S.findings.map((el) => `<div class="ev-el find">${el.prefix || 'Elemen'} ${el.code} · ${esc(el.title)}</div>
+    ${el.groups.map((g) => `<div class="ev-find ${g.kind}">
+      <div class="ev-fh"><span class="ev-num">${++fNum}</span><b>${esc(g.code)}</b><span class="ev-badge">${g.kind === 'temuan' ? 'TEMUAN' : 'CATATAN'}${g.grade ? ' · NILAI ' + (g.grade === 'X' ? 'N/A' : g.grade) : ''}${g.pinalti ? ' · PINALTI' : ''}</span></div>
+      <div class="ev-desc">${esc(g.fullDesc || g.title)}</div>
+      ${g.note ? `<div class="ev-note">${esc(g.note)}</div>` : ''}
+      ${g.photos.length ? `<div class="ev-grid">${g.photos.map(tile).join('')}</div>` : '<div class="hint">Tidak ada foto untuk item ini.</div>'}
+    </div>`).join('')}`).join('')
+  const evidenceHtml = S.evidence.map((el) => `<div class="ev-el">${el.prefix || 'Elemen'} ${el.code} · ${esc(el.title)}</div>
+    ${el.groups.map((g) => `<div class="ev-group"><div class="ev-gh"><span class="ev-num">${++eNum}</span><b>${esc(g.code)}</b> ${esc(g.title)}</div>
+      <div class="ev-grid">${g.photos.map(tile).join('')}</div></div>`).join('')}`).join('')
+  return `
+    ${S.findings.length ? `<div class="section-title">Lampiran Temuan &amp; Catatan (${S.counts.findingGroups})</div><div class="card">${findingsHtml}</div>` : ''}
+    ${S.evidence.length ? `<div class="section-title">Lampiran Foto Evidence (${S.counts.evidencePhotos})</div><div class="card">${evidenceHtml}</div>` : ''}`
+}
+
 function viewReport() {
   const a = curAudit()
   const R = buildReport(a)
@@ -1363,24 +1458,7 @@ function viewReport() {
   const qq = R.qq.length ? reportTable(['Nozzle', 'Produk', 'Mode', 'Tera (ml)', 'Qty Var', 'Obs', 'Temp', 'D15', 'Ref D15', 'Var'],
     R.qq.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`)) : '<p class="hint">Belum ada data nozzle.</p>'
 
-  const S = R.photoSections
-  const tile = ({ photo: p, caption }) => `<div class="ev-tile" data-viewphoto="id|${esc(p.id || '')}"><div class="ev-img"><img src="${thumbSrc(p)}" data-full="${esc(p.id || '')}" alt="" loading="lazy"></div>
-    <b>${esc(caption)}</b><small>${p.source === 'gallery' ? 'Galeri' : `${p.ts ? esc(formatStampTime(p.ts)) : ''}${p.code ? ' · ' + esc(p.code) : ''}`}</small></div>`
-  let fNum = 0
-  let eNum = 0
-  const findingsHtml = S.findings.map((el) => `<div class="ev-el find">Elemen ${el.code} · ${esc(el.title)}</div>
-    ${el.groups.map((g) => `<div class="ev-find ${g.kind}">
-      <div class="ev-fh"><span class="ev-num">${++fNum}</span><b>${esc(g.code)}</b><span class="ev-badge">${g.kind === 'temuan' ? 'TEMUAN' : 'CATATAN'}${g.grade ? ' · NILAI ' + (g.grade === 'X' ? 'N/A' : g.grade) : ''}${g.pinalti ? ' · PINALTI' : ''}</span></div>
-      <div class="ev-desc">${esc(g.fullDesc || g.title)}</div>
-      ${g.note ? `<div class="ev-note">${esc(g.note)}</div>` : ''}
-      ${g.photos.length ? `<div class="ev-grid">${g.photos.map(tile).join('')}</div>` : '<div class="hint">Tidak ada foto untuk item ini.</div>'}
-    </div>`).join('')}`).join('')
-  const evidenceHtml = S.evidence.map((el) => `<div class="ev-el">Elemen ${el.code} · ${esc(el.title)}</div>
-    ${el.groups.map((g) => `<div class="ev-group"><div class="ev-gh"><span class="ev-num">${++eNum}</span><b>${esc(g.code)}</b> ${esc(g.title)}</div>
-      <div class="ev-grid">${g.photos.map(tile).join('')}</div></div>`).join('')}`).join('')
-  const photoHtml = `
-    ${S.findings.length ? `<div class="section-title">Lampiran Temuan &amp; Catatan (${S.counts.findingGroups})</div><div class="card">${findingsHtml}</div>` : ''}
-    ${S.evidence.length ? `<div class="section-title">Lampiran Foto Evidence (${S.counts.evidencePhotos})</div><div class="card">${evidenceHtml}</div>` : ''}`
+  const photoHtml = photoSectionsHtml(R.photoSections)
 
   return `
   <div id="reportContent">
@@ -1523,9 +1601,8 @@ async function exportPDF() {
     return
   }
   try {
-    const { createReportPdf } = mod
-    const R = buildReport(a)
-    const doc = await createReportPdf(R, { loadPhoto: loadPhotoForPdf })
+    const R = reportFor(a)
+    const doc = isCcu(a) ? await mod.createCcuPdf(R, { loadPhoto: loadPhotoForPdf }) : await mod.createReportPdf(R, { loadPhoto: loadPhotoForPdf })
     doc.save(R.fileName)
     showToast(`✓ PDF ${doc.getNumberOfPages()} halaman diunduh`)
   } catch (e) {
@@ -1562,13 +1639,13 @@ async function exportTeraPDF() {
 async function exportPhotosZip() {
   const a = curAudit()
   if (!a) return
-  const R = buildReport(a)
+  const R = reportFor(a)
   if (!R.photos.length) { showToast('Audit ini belum punya foto'); return }
   showToast(`Mengumpulkan ${R.photos.length} foto…`, 20000)
   try {
     const { makeZip } = await import('./lib/zip.js')
     const safe = (x) => String(x || '').replace(/[^\w.-]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')
-    const folder = `Foto_SPBU_${safe(a.info.nomorSpbu) || 'SPBU'}_${safe(a.info.tanggalAudit)}`
+    const folder = `${isCcu(a) ? 'Foto_CCU' : 'Foto_SPBU'}_${safe(a.info.nomorSpbu) || 'SPBU'}_${safe(a.info.tanggalAudit || a.info.tanggalKunjungan)}`
     const files = []
     let missing = 0
     const pad = (n) => String(n).padStart(2, '0')
@@ -1599,7 +1676,163 @@ async function exportPhotosZip() {
 }
 
 /* =========================================================
+   MODUL CROSS CHECK UP (CCU) SPBU COCO
+   (fitur sama dengan audit Pertamina Way: nilai sesuai skala, foto kamera/galeri,
+   catatan, Submit→Edit, Submit Data + animasi, PDF format Excel CCU, lampiran)
+   ========================================================= */
+function ccuFormErrors(a) {
+  const i = a.info
+  const errs = []
+  if (!String(i.namaSpbu || '').trim() && !String(i.nomorSpbu || '').trim()) errs.push('Nama atau No SPBU belum diisi')
+  if (!i.tanggalKunjungan) errs.push('Tanggal kunjungan belum diisi')
+  if (!String(i.abhObserver || '').trim()) errs.push('Nama ABH Observer belum diisi')
+  return errs
+}
+
+function viewCcuForm() {
+  const a = curAudit()
+  const i = a.info
+  const chip = (key, label, hint) => `<button class="choice-chip ${i[key] !== false ? 'on' : ''}" data-ccutoggle="${key}">${label}</button><div class="hint" style="margin:4px 0 10px">${hint}</div>`
+  return `
+  <div class="report-head" style="margin-top:6px">
+    <div class="rh-title">CROSS CHECK UP (CCU) SPBU COCO</div>
+    <div class="rh-sub">PT Pertamina Retail &middot; <span class="mono">F12/CCU-SPBU/R1/2024</span></div>
+  </div>
+  <div class="section-title">Informasi Kunjungan <span class="req">wajib</span></div>
+  <div class="card">
+    ${infoInput('namaSpbu', 'Nama SPBU', { placeholder: 'cth. SPBU COCO Kediri' })}
+    <div class="field-row">${infoInput('nomorSpbu', 'No SPBU', { inputmode: 'numeric' })}${infoInput('kota', 'Kota')}</div>
+    <div class="field-row">${infoInput('tanggalKunjungan', 'Tanggal Kunjungan', { type: 'date' })}${infoInput('waktuKunjungan', 'Waktu Kunjungan', { type: 'time' })}</div>
+    ${infoInput('namaAbh', 'Nama ABH')}
+    ${infoInput('abhObserver', 'Nama ABH Observer')}
+    ${infoInput('pengawas', 'Pengawas SPBU')}
+  </div>
+  <div class="section-title">Kondisi SPBU</div>
+  <div class="card">
+    ${chip('adaBrightStore', 'SPBU memiliki Bright Store / Café', i.adaBrightStore !== false ? 'Aspek XIV (43 item) dinilai.' : 'Tidak ada Bright Store → aspek XIV otomatis nilai A (skor 100), item disembunyikan.')}
+    ${chip('adaJbt', 'SPBU melayani JBT (Subsidi Tepat)', i.adaJbt !== false ? 'Aspek XV (7 item) dinilai.' : 'Tidak ada JBT → aspek XV otomatis nilai A (skor 100), item disembunyikan.')}
+  </div>
+  <button class="btn-primary" data-action="tochecklist">Lanjut ke Checklist CCU &#8250;</button>
+  <div style="height:10px"></div>
+  <button class="btn-danger" data-action="deleteaudit" style="width:100%;">Hapus Audit Ini</button>`
+}
+
+function ccuItemCardHtml(a, it, opts = {}) {
+  const r = getResult(a, it.code)
+  const locked = !!r.submittedAt
+  const crumb = [`${it.secCode}. ${it.secTitle.replace(/^PENGECEKAN\s+/, '')}`, it.partTitle, it.groupTitle].filter(Boolean).join(' › ')
+  return `
+  <div class="item-card ${locked ? 'submitted' : ''}" id="item-${it.code.replace(/\./g, '_')}" data-item="${it.code}" data-crumb="${opts.breadcrumb ? 1 : 0}">
+    ${opts.breadcrumb ? `<div class="crumb">${esc(crumb)}</div>` : ''}
+    <div class="item-head">
+      <div class="code">${it.code}<span class="type-tag ccu sm">CCU</span></div>
+      <span data-status="${it.code}">${statusChip(r)}</span>
+    </div>
+    <div class="desc">${esc(it.desc)}</div>
+    ${it.ket ? `<div class="hint" style="margin:-2px 0 6px">Keterangan: ${esc(it.ket)}</div>` : ''}
+    <div class="item-body"${locked ? ' inert' : ''}>
+      <div class="grade-row" data-graderow="${it.code}">${gradeRowHtml(it, r)}</div>
+      ${(noteOpenSet.has(it.code) || r.note) ? `<div class="item-note field"><textarea placeholder="Catatan temuan / keterangan..." data-note="${it.code}">${esc(r.note)}</textarea></div>` : ''}
+    </div>
+    <div class="item-toolrow">
+      <button class="photo-btn" data-photo="${it.code}" ${locked ? 'disabled' : ''}>${iconCamera} Foto (${(r.photos || []).length})</button>
+      <button class="gallery-btn" data-gallery="item|${it.code}" ${locked ? 'disabled' : ''} aria-label="Upload dari galeri">${iconGallery} Galeri</button>
+      <button class="note-toggle" data-notetoggle="${it.code}" ${locked ? 'disabled' : ''}>${noteOpenSet.has(it.code) || r.note ? 'Sembunyikan catatan' : '+ Catatan'}</button>
+      ${locked
+        ? `<button class="submit-btn edit" data-edit="${it.code}">✎ Edit</button>`
+        : `<button class="submit-btn" data-submit="${it.code}">Submit</button>`}
+    </div>
+    ${thumbsHtml(r.photos, `data-rmphoto="${it.code}" data-idx`, `item|${it.code}`, locked)}
+  </div>`
+}
+
+function ccuDashInner(comp) {
+  return `<div class="ccu-dash-ts" style="background:${CCU_STATUS_COLOR[comp.status]}"><span>TOTAL SCORE CCU</span><b>${comp.ts.toFixed(2)}</b><small>${comp.status}</small></div>
+    <div class="ccu-dash-meta"><div><b>${comp.totalSubmitted}/${comp.totalItems}</b><span>item tersubmit</span></div><div><b>${comp.findings}</b><span>temuan (&lt; A)</span></div></div>`
+}
+
+function ccuBodyHtml(a) {
+  const comp = computeCcu(a)
+  const q = searchQuery.trim().toLowerCase()
+  if (q) {
+    const hits = ccuApplicableItems(a).filter((it) => `${it.code} ${it.desc} ${it.secTitle} ${it.groupTitle || ''}`.toLowerCase().includes(q))
+    return `<div class="section-title">${hits.length} item cocok</div>
+      ${hits.map((it) => `<div class="search-hit">${ccuItemCardHtml(a, it, { breadcrumb: true })}<button class="jump-link" data-jump="${it.code}">Buka di checklist &#8250;</button></div>`).join('') || '<div class="hint">Tidak ada item yang cocok.</div>'}`
+  }
+  const dash = `<div class="ccu-dash" id="ccuDash">${ccuDashInner(comp)}</div>`
+  const secs = CCU_SECTIONS.map((s) => {
+    const sc = comp.sections.find((x) => x.code === s.code)
+    const isOpen = currentElementOpen === s.code
+    const col = CCU_STATUS_COLOR[sc.score <= 35 ? 'Warning' : sc.score <= 60 ? 'Poor' : sc.score <= 80 ? 'Average' : sc.score <= 95 ? 'Good' : 'Excellent']
+    let body = ''
+    if (isOpen) {
+      if (sc.skipped) {
+        body = `<div class="hint" style="padding:6px 4px">${s.code === 'XIV' ? 'SPBU tidak memiliki Bright Store/Café' : 'SPBU tidak melayani JBT'} — sesuai Excel aspek ini otomatis bernilai <b>A (skor 100)</b>. Ubah di <b>Data Kunjungan</b> bila keliru.</div>`
+      } else {
+        const parts = s.parts || [{ code: null, groups: s.groups }]
+        body = parts.map((p, k) => `${p.code ? `<div class="subgroup-title ccu-part">${esc(p.code)} ${esc(p.title)} <span class="mini-pill">${sc.parts[k].score.toFixed(2)}</span></div>` : ''}
+          ${p.groups.map((g) => `${g.code ? `<div class="subgroup-title">${esc(g.code)} ${esc(g.title)}</div>` : ''}${g.items.map((it) => ccuItemCardHtml(a, CCU_BY_CODE[it.code])).join('')}`).join('')}`).join('')
+      }
+    }
+    return `<div class="card" style="padding:0;overflow:hidden;" id="el-${s.code}">
+      <div class="elem-header" data-toggle-el="${s.code}">
+        <div class="idx ccu-idx">${s.code}</div>
+        <div class="info">
+          <div class="t">${esc(s.title.replace(/^PENGECEKAN\s+/, ''))}</div>
+          <div class="s">${sc.skipped ? 'tidak berlaku (nilai A)' : `${sc.submitted}/${sc.applicable} submit`} &middot; bobot ${Math.round(s.bobot * 100)}%</div>
+        </div>
+        <span class="compliance-chip" style="background:${col}22;color:${col};">${sc.score.toFixed(0)}</span>
+        <span class="chev" style="margin-left:4px;">${isOpen ? '&#9662;' : '&#8250;'}</span>
+      </div>
+      ${isOpen ? `<div class="elem-body">${body}</div>` : ''}
+    </div>`
+  }).join('')
+  return `${dash}<div class="section-title">Checklist CCU · 15 Aspek</div>${secs}`
+}
+
+function viewCcuReport() {
+  const a = curAudit()
+  const R = buildCcuReport(a)
+  const col = CCU_STATUS_COLOR[R.status]
+  const infoRows = R.infoRows.map((r) => `<div class="kv"><span>${esc(r[0])}</span><b>${esc(r[1])}</b></div><div class="kv"><span>${esc(r[2])}</span><b>${esc(r[3])}</b></div>`).join('')
+  const lvl = (v) => CCU_STATUS_COLOR[v <= 35 ? 'Warning' : v <= 60 ? 'Poor' : v <= 80 ? 'Average' : v <= 95 ? 'Good' : 'Excellent']
+  const rekap = reportTable(['No', 'Item Penilaian', 'Jml', 'Nilai', 'Bobot', 'Score'], [
+    ...R.rekap.map((x) => `<tr><td>${x.no}</td><td class="t">${esc(x.title)}</td><td>${x.jumlah}</td><td><span class="chip" style="background:${lvl(x.nilai)}">${x.nilai.toFixed(2)}</span></td><td>${Math.round(x.bobot * 100)}%</td><td>${x.skor.toFixed(2)}</td></tr>`),
+    `<tr class="total-row"><td colspan="4">TOTAL SCORE</td><td>100%</td><td>${R.ts.toFixed(2)}</td></tr>`,
+  ])
+  const autoTemuan = R.catatan.filter((t) => t.startsWith('['))
+  return `
+  <div id="reportContent">
+  <div class="report-head">
+    <div class="rh-title">${esc(R.title)}</div>
+    <div class="rh-sub">${esc(R.unit)} &middot; <span class="mono">${esc(R.formCode)}</span> &middot; No. Report <span class="mono">${esc(R.reportNo)}</span></div>
+  </div>
+  <div class="score-hero" style="background:linear-gradient(135deg, ${col}, ${col}cc);">
+    <div class="num">${R.ts.toFixed(2)}</div>
+    <div class="cls">STATUS: ${esc(R.status.toUpperCase())}</div>
+    <div class="sub">${R.comp.totalSubmitted}/${R.comp.totalItems} item tersubmit${a.status === 'selesai' ? ' &middot; laporan terkirim' : ' &middot; draft'}</div>
+  </div>
+  <div class="section-title">Informasi Kunjungan</div>
+  <div class="card kv-grid">${infoRows}</div>
+  <div class="section-title">Rekap Score Cross Check Up</div>
+  <div class="card">${rekap}<p class="hint" style="margin-top:6px">Status: &le;35 Warning &middot; &le;60 Poor &middot; &le;80 Average &middot; &le;95 Good &middot; &gt;95 Excellent.</p></div>
+  <div class="section-title">Catatan atas Temuan di Lapangan</div>
+  <div class="card">
+    ${autoTemuan.length ? `<ol class="komentar-list">${autoTemuan.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>` : '<p class="hint">Belum ada item bernilai di bawah A.</p>'}
+    <div class="field" style="margin:8px 0 0"><label>Temuan lain (satu per baris)</label><textarea data-info="catatanTemuan" rows="3" placeholder="cth. Housekeeping tidak dilaksanakan dengan baik">${esc(a.info.catatanTemuan || '')}</textarea></div>
+  </div>
+  <div class="section-title">Rekomendasi Tindak Lanjut atas Temuan</div>
+  <div class="card"><div class="field" style="margin:0"><textarea data-info="rekomendasi" rows="4" placeholder="Satu rekomendasi per baris">${esc(a.info.rekomendasi || '')}</textarea></div></div>
+  ${photoSectionsHtml(R.photoSections)}
+  </div>
+  <button class="btn-primary pdf-btn" data-action="pdf">Unduh Laporan CCU (PDF A4)</button>
+  <div class="export-row"><button class="btn-secondary" data-action="photozip">Unduh Semua Foto (ZIP, kualitas asli)</button></div>
+  <p class="hint" style="text-align:center;margin-top:8px;">Format mengikuti Excel Checklist CCU SPBU COCO: kepala formulir, Rekap Score, checklist 15 aspek, catatan, rekomendasi, approval, lalu lampiran temuan &amp; evidence.</p>`
+}
+
+/* =========================================================
    VIEW: ABOUT / GUIDE
+
    ========================================================= */
 function viewAbout() {
   return `
@@ -1618,6 +1851,10 @@ function viewAbout() {
       <li>Setelah semua item tersubmit, tekan <b>Submit Laporan</b>.</li>
       <li>Buka <b>Laporan</b> untuk hasil akhir, lalu unduh <b>PDF A4</b>.</li>
     </ol>
+  </div>
+  <div class="card">
+    <b>Cross Check Up (CCU) SPBU COCO</b>
+    <p style="font-size:13px;line-height:1.6;">Pilih <b>Cross Check Up</b> saat <b>+ Mulai Audit Baru</b>. Isi data kunjungan (Nama/No SPBU, ABH, ABH Observer, Pengawas, tanggal &amp; waktu) dan kondisi SPBU (ada Bright Store / JBT). Checklist 158 item dalam 15 aspek; nilai A/C/F, A/F atau A–F sesuai formulir. Skor aspek &amp; Total Score dihitung persis seperti Excel <i>F12/CCU-SPBU/R1/2024</i> (status Warning ≤35, Poor ≤60, Average ≤80, Good ≤95, Excellent &gt;95). Laporan PDF mengikuti formulir Excel + lampiran temuan &amp; evidence.</p>
   </div>
   <div class="card">
     <b>Logika Penilaian</b>
@@ -1664,6 +1901,10 @@ function pendingCount() {
 }
 
 function summaryFor(a) {
+  if (isCcu(a)) {
+    const sm = auditSummary(a)
+    return { type: 'ccu', ts: Math.round(sm.ts * 100) / 100, classification: sm.label.toLowerCase(), statusLabel: sm.label, totalSubmitted: sm.totalSubmitted, totalGraded: sm.totalGraded, totalItems: sm.totalItems, areaBusinessHead: a.info.namaAbh || '', auditorEmail: cloud.session ? cloud.session.user.email : '' }
+  }
   const comp = computeAudit(a)
   return {
     ts: Math.round(comp.ts * 100) / 100,
@@ -1973,7 +2214,7 @@ function remoteListHtml() {
       <div class="audit-badge" style="background:${band.color}22;color:${band.color};">${(sm.ts || 0).toFixed(0)}</div>
       <div class="meta">
         <div class="title">${esc(r.nomor_spbu || 'SPBU')} &middot; ${esc(r.kota || '-')}</div>
-        <div class="sub">${esc(r.tanggal_audit || '-')} &middot; ${clsLabel(sm.classification)} &middot; ${sm.totalSubmitted || 0}/${sm.totalItems || 125} submit</div>
+        <div class="sub">${esc(r.tanggal_audit || '-')} &middot; ${sm.type === 'ccu' ? `<span class="type-tag ccu">CCU</span> ${esc(sm.statusLabel || '')}` : clsLabel(sm.classification)} &middot; ${sm.totalSubmitted || 0}/${sm.totalItems || 125} submit</div>
         <div class="sub">${esc(sm.auditorEmail || r.created_by_email || '')} <span class="pill ${r.status}">${r.status === 'selesai' ? 'Selesai' : 'Draft'}</span></div>
       </div>
       ${badge}
@@ -2147,7 +2388,11 @@ function onClick(ev) {
 
   const action = t.closest('[data-action]')?.dataset.action
   if (action) {
-    if (action === 'newaudit') { const id = newAudit(); pinaltiFilter = null; searchQuery = ''; currentElementOpen = null; go('form', { auditId: id }) }
+    if (action === 'newaudit') {
+      showModal(`<h3>Pilih Jenis Audit</h3>
+        <button class="type-opt" data-newtype="pw"><span class="type-tag">PW</span><b>Audit Pertamina Way</b><small>Checklist Pasti Pas 125 item · Good / Excellent</small></button>
+        <button class="type-opt" data-newtype="ccu"><span class="type-tag ccu">CCU</span><b>Cross Check Up (CCU) SPBU COCO</b><small>158 item · 15 aspek · format ${esc('F12/CCU-SPBU/R1/2024')}</small></button>`)
+    }
     else if (action === 'tochecklist') enterChecklist()
     else if (action === 'addauditor') {
       const a = curAudit()
@@ -2285,6 +2530,24 @@ function onClick(ev) {
     const code = noteT.dataset.notetoggle
     if (isLocked(code)) return
     if (noteOpenSet.has(code)) noteOpenSet.delete(code); else noteOpenSet.add(code)
+    render()
+    return
+  }
+
+  const newType = t.closest('[data-newtype]')
+  if (newType) {
+    closeModal()
+    const id = newAudit(newType.dataset.newtype)
+    pinaltiFilter = null; searchQuery = ''; currentElementOpen = null
+    go('form', { auditId: id })
+    return
+  }
+  const ccuToggle = t.closest('[data-ccutoggle]')
+  if (ccuToggle) {
+    const a = curAudit()
+    const key = ccuToggle.dataset.ccutoggle
+    a.info[key] = !(a.info[key] !== false)
+    persist(a.id)
     render()
     return
   }
