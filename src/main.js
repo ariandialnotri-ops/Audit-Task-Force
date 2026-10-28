@@ -287,6 +287,7 @@ function render() {
   const c = contentEl()
   const landing = !cloud.ready || !cloud.session
   document.body.classList.toggle('landing-mode', landing)
+  if (landing) document.body.classList.remove('audit-mode')
   if (landing) {
     document.getElementById('tabbar').innerHTML = ''
     document.getElementById('topbar').innerHTML = ''
@@ -305,7 +306,13 @@ function render() {
   else if (currentView === 'account') c.innerHTML = viewAccount()
 }
 
+const AUDIT_VIEWS = ['form', 'checklist', 'report']
 function renderTabbar() {
+  // Saat mengisi audit, menu bawah disembunyikan agar tidak tersentuh tanpa sengaja;
+  // keluar hanya lewat tombol kembali di bar atas.
+  const inAudit = AUDIT_VIEWS.includes(currentView)
+  document.body.classList.toggle('audit-mode', inAudit)
+  if (inAudit) { document.getElementById('tabbar').innerHTML = ''; return }
   const tabs = [
     { id: 'home', label: 'Beranda', icon: iconHome },
     { id: 'history', label: 'Riwayat', icon: iconHistory },

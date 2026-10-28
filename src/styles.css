@@ -847,3 +847,8 @@ body.landing-mode .content{padding-bottom:24px;}
 .ccu-dash-meta b{font-family:var(--font-mono);font-size:17px;}
 .ccu-dash-meta span{font-family:var(--font-ui);font-size:11px;color:var(--muted);}
 .report-table td.t{font-family:var(--font-ui);font-size:12px;}
+
+/* Mode isi audit: menu bawah disembunyikan (cegah salah sentuh) */
+body.audit-mode .tabbar{display:none;}
+body.audit-mode .content{padding-bottom:calc(96px + env(safe-area-inset-bottom,0px));}
+body.audit-mode .report-fab{bottom:calc(env(safe-area-inset-bottom,0px) + 22px);}
