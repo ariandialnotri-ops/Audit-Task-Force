@@ -62,6 +62,38 @@ function block(state, draw, gapAfter = 3) {
 function newPage(state) {
   state.doc.addPage()
   state.y = TOP
+  if (state.section) {
+    state.sectionPages[state.doc.getNumberOfPages()] = state.section
+    const tint = SECTION_STYLE[state.section] && SECTION_STYLE[state.section].tint
+    if (tint) { state.doc.setFillColor(...tint); state.doc.rect(0, 0, PAGE_W, PAGE_H, 'F') }
+  }
+}
+
+/* Penanda halaman lampiran: setiap halaman TEMUAN berbeda jelas dari halaman EVIDENCE. */
+const SECTION_STYLE = {
+  f: { label: 'LAMPIRAN TEMUAN & CATATAN', col: [204, 0, 0], tint: [255, 247, 247] },
+  e: { label: 'LAMPIRAN FOTO EVIDENCE', col: hex(COLORS.navy), tint: null },
+}
+function drawSectionMarks(doc, sectionPages) {
+  const pages = Object.keys(sectionPages).map(Number)
+  const totalOf = (k) => pages.filter((p) => sectionPages[p] === k).length
+  const idx = { f: 0, e: 0 }
+  pages.sort((x, y) => x - y).forEach((p) => {
+    const k = sectionPages[p]
+    const st = SECTION_STYLE[k]
+    idx[k]++
+    doc.setPage(p)
+    // pita atas berwarna + garis tepi kiri
+    doc.setFillColor(...st.col)
+    doc.rect(0, 0, PAGE_W, 7, 'F')
+    doc.rect(0, 7, 2.2, PAGE_H - 7, 'F')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(8)
+    doc.setTextColor(255, 255, 255)
+    doc.text(pdfText(st.label), M, 4.8)
+    doc.text(`Lembar ${idx[k]} / ${totalOf(k)}`, PAGE_W - M, 4.8, { align: 'right' })
+    doc.setTextColor(0, 0, 0)
+  })
 }
 
 function sectionBar(doc, y, text) {
@@ -421,7 +453,9 @@ async function drawEvidence(state, S, loadPhoto) {
   const sub = (k) => (k === 'f' ? 'Item bernilai di bawah A atau berisi catatan auditor, dikelompokkan per elemen Pertamina Way' : 'Dokumentasi pendukung item yang memenuhi standar, dikelompokkan per elemen Pertamina Way')
 
   /* ---- 1) Temuan & Catatan (disorot) ---- */
+  state.sectionPages = state.sectionPages || {}
   if (S.findings.length) {
+    state.section = 'f'
     newPage(state)
     sectionHead(state, 'LAMPIRAN TEMUAN & CATATAN', sub('f'), `${S.counts.findingGroups} item · ${S.counts.findingPhotos} foto`)
     let num = 0
@@ -501,6 +535,7 @@ async function drawEvidence(state, S, loadPhoto) {
 
   /* ---- 2) Evidence (grid rapi seperti lampiran foto) ---- */
   if (S.evidence.length) {
+    state.section = 'e'
     newPage(state)
     sectionHead(state, 'LAMPIRAN FOTO EVIDENCE', sub('e'), `${S.counts.evidencePhotos} foto`)
     let num = 0
@@ -534,6 +569,7 @@ async function drawEvidence(state, S, loadPhoto) {
       state.y += 2
     }
   }
+  state.section = null
 }
 
 function drawFooters(doc, R, verifyCode) {
@@ -572,7 +608,10 @@ export async function createReportPdf(R, { loadPhoto = null, includePhotos = tru
   drawKomentar(state, R)
   drawQQ(state, R)
   if (includePhotos && loadPhoto) {
-    if (R.photoSections) await drawEvidence(state, R.photoSections, loadPhoto)
+    if (R.photoSections) {
+      await drawEvidence(state, R.photoSections, loadPhoto)
+      drawSectionMarks(doc, state.sectionPages)
+    }
     else await drawPhotos(state, R, loadPhoto)
   }
   drawFooters(doc, R, await sha256Short(R.fingerprint))
