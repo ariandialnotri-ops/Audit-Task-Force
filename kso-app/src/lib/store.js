@@ -1,5 +1,5 @@
-// Penyimpanan lokal: IndexedDB `monitoring-kso` — store `kv` (state JSON) + store `files` (Blob materi).
-const DB_NAME = 'monitoring-kso';
+// Penyimpanan lokal: IndexedDB `kso-tac-target` — store `kv` (state JSON) + store `files` (Blob materi).
+const DB_NAME = 'kso-tac-target';
 const STATE_KEY = 'state';
 let dbp = null;
 
@@ -32,8 +32,8 @@ async function tx(store, mode, fn) {
 
 export const emptyState = () => ({
   version: 1,
-  spbu: [], monitoring: [], followups: [], materi: [], templates: null,
-  settings: { pengirim: '', jabatan: '', warnDays: 90 },
+  targets: [], materi: [], templates: null,
+  settings: { pengirim: '', jabatan: '', perusahaan: 'PT Pertamina Retail', targetGoLive: '' },
 });
 
 export async function loadState() {

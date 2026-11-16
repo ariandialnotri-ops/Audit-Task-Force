@@ -36,24 +36,22 @@ export function displayPhone(raw) {
 
 export const PLACEHOLDERS = [
   ['salam', 'Salam pembuka sesuai jam (Pagi/Siang/Sore/Malam)'],
-  ['pic', 'Nama PIC mitra'],
-  ['spbu', 'Nama SPBU'],
-  ['nomor', 'Nomor SPBU'],
-  ['mitra', 'Nama mitra KSO'],
-  ['judul', 'Judul tindak lanjut'],
-  ['detail', 'Deskripsi tindak lanjut'],
-  ['tenggat', 'Tenggat tindak lanjut'],
-  ['status', 'Status tindak lanjut'],
-  ['daftar', 'Daftar tindak lanjut terbuka SPBU'],
-  ['periode', 'Periode monitoring terakhir'],
-  ['volume', 'Volume realisasi periode terakhir'],
-  ['target', 'Target volume'],
-  ['capaian', 'Capaian % periode terakhir'],
-  ['akhirKontrak', 'Tanggal berakhir kontrak'],
+  ['pic', 'Nama PIC SPBU'],
+  ['sbm', 'Nama SBM'],
+  ['nomor', 'Nomor SPBU (54.644.21)'],
+  ['kota', 'Kota / kabupaten'],
+  ['tahap', 'Tahapan terakhir'],
+  ['berikutnya', 'Tahapan berikutnya'],
+  ['plan', 'Tanggal plan sosialisasi & survey'],
+  ['penawaran', 'Penawaran sharing'],
+  ['keterangan', 'Keterangan'],
+  ['aksi', 'Rencana tindak lanjut berikutnya'],
+  ['jadwal', 'Tanggal tindak lanjut berikutnya'],
   ['materi', 'Judul materi'],
   ['link', 'Link materi'],
   ['pengirim', 'Nama pengirim (Pengaturan)'],
   ['jabatan', 'Jabatan pengirim (Pengaturan)'],
+  ['perusahaan', 'Nama perusahaan pengirim (Pengaturan)'],
 ];
 
 export function greeting(date = new Date()) {
@@ -64,29 +62,22 @@ export function greeting(date = new Date()) {
   return 'Selamat malam';
 }
 
+const TTD = '\n\nHormat kami,\n{pengirim}\n{jabatan}\n{perusahaan}';
+
+// `untuk`: 'pic' (PIC/owner SPBU), 'sbm' (Sales Branch Manager), 'materi' (kirim materi ke PIC).
 export const DEFAULT_TEMPLATES = [
-  {
-    id: 'tpl-reminder', nama: 'Pengingat tindak lanjut', untuk: 'tindak',
-    isi: '{salam} Bapak/Ibu {pic},\n\nMenindaklanjuti hasil monitoring SPBU {nomor} {spbu}, mohon tindak lanjut atas:\n*{judul}*\n{detail}\n\nTenggat: *{tenggat}*\nStatus saat ini: {status}\n\nMohon kirimkan bukti perbaikan (foto/dokumen) melalui chat ini. Terima kasih.\n\n{pengirim}\n{jabatan}',
-  },
-  {
-    id: 'tpl-rekap', nama: 'Rekap tindak lanjut terbuka', untuk: 'spbu',
-    isi: '{salam} Bapak/Ibu {pic},\n\nBerikut rekap tindak lanjut SPBU {nomor} {spbu} yang masih terbuka:\n{daftar}\n\nMohon update progresnya. Terima kasih.\n\n{pengirim}\n{jabatan}',
-  },
-  {
-    id: 'tpl-kinerja', nama: 'Info kinerja volume', untuk: 'spbu',
-    isi: '{salam} Bapak/Ibu {pic},\n\nInformasi kinerja SPBU {nomor} {spbu} periode {periode}:\nRealisasi: {volume} KL\nTarget: {target} KL\nCapaian: *{capaian}*\n\nMohon langkah perbaikan untuk mencapai target. Terima kasih.\n\n{pengirim}\n{jabatan}',
-  },
-  {
-    id: 'tpl-laporan', nama: 'Permintaan laporan bulanan', untuk: 'spbu',
-    isi: '{salam} Bapak/Ibu {pic},\n\nMohon kiriman laporan operasional & penjualan bulanan SPBU {nomor} {spbu} sesuai ketentuan kerja sama KSO.\n\nTerima kasih.\n\n{pengirim}\n{jabatan}',
-  },
-  {
-    id: 'tpl-kontrak', nama: 'Pengingat masa kontrak', untuk: 'spbu',
-    isi: '{salam} Bapak/Ibu {pic},\n\nKami informasikan perjanjian KSO SPBU {nomor} {spbu} ({mitra}) berakhir pada *{akhirKontrak}*. Mohon koordinasi untuk proses evaluasi/perpanjangan.\n\nTerima kasih.\n\n{pengirim}\n{jabatan}',
-  },
-  {
-    id: 'tpl-materi', nama: 'Kirim materi', untuk: 'materi',
-    isi: '{salam} Bapak/Ibu {pic},\n\nBerikut kami sampaikan materi *{materi}* untuk SPBU {nomor} {spbu}.\n{link}\n\nMohon dipelajari dan disosialisasikan ke seluruh operator. Terima kasih.\n\n{pengirim}\n{jabatan}',
-  },
+  { id: 'tpl-kenal', nama: 'Perkenalan & ajakan sosialisasi KSO TAC', untuk: 'pic',
+    isi: '{salam} Bapak/Ibu {pic},\n\nPerkenalkan, saya {pengirim} ({jabatan}). Kami ingin memperkenalkan peluang kerja sama pengelolaan SPBU {nomor} melalui skema *KSO TAC* bersama {perusahaan}.\n\nBila berkenan, kami ingin menjadwalkan sosialisasi & survey di lokasi SPBU. Kapan waktu yang Bapak/Ibu (dan owner) luangkan?\n\nTerima kasih.' + TTD },
+  { id: 'tpl-jadwal', nama: 'Konfirmasi jadwal sosialisasi & survey', untuk: 'pic',
+    isi: '{salam} Bapak/Ibu {pic},\n\nMengonfirmasi rencana *sosialisasi & survey KSO TAC* di SPBU {nomor} ({kota}) pada *{plan}*.\n\nMohon konfirmasi kehadiran owner / pengelola. Terima kasih.' + TTD },
+  { id: 'tpl-materi', nama: 'Kirim materi', untuk: 'materi',
+    isi: '{salam} Bapak/Ibu {pic},\n\nBerikut kami sampaikan materi *{materi}* sebagai bahan pertimbangan kerja sama KSO TAC untuk SPBU {nomor}.\n{link}\n\nKami siap menjelaskan lebih lanjut bila ada pertanyaan.' + TTD },
+  { id: 'tpl-penawaran', nama: 'Follow-up penawaran sharing', untuk: 'pic',
+    isi: '{salam} Bapak/Ibu {pic},\n\nMenindaklanjuti penawaran sharing KSO TAC untuk SPBU {nomor} ({penawaran}), kami ingin menanyakan tanggapan owner serta hal yang masih perlu kami jelaskan atau diskusikan.\n\nKami menunggu kabar baiknya.' + TTD },
+  { id: 'tpl-fu', nama: 'Follow-up tindak lanjut', untuk: 'pic',
+    isi: '{salam} Bapak/Ibu {pic},\n\nMelanjutkan pembahasan kerja sama KSO TAC SPBU {nomor}. Rencana berikutnya: *{aksi}*{jadwal}.\n\nMohon kabar dari Bapak/Ibu. Terima kasih.' + TTD },
+  { id: 'tpl-sbm', nama: 'Minta bantuan SBM menghubungkan owner', untuk: 'sbm',
+    isi: '{salam} Pak {sbm},\n\nMohon bantuan untuk menginformasikan/menghubungkan kami dengan owner SPBU {nomor} ({kota}) terkait rencana *sosialisasi & survey KSO TAC*.\n\nStatus terakhir: {keterangan}\n\nTerima kasih atas bantuannya.' + TTD },
+  { id: 'tpl-sbm-update', nama: 'Update progres ke SBM', untuk: 'sbm',
+    isi: '{salam} Pak {sbm},\n\nUpdate progres KSO TAC SPBU {nomor} ({kota}):\nTahapan: *{tahap}*\nKeterangan: {keterangan}\nRencana berikutnya: {aksi}{jadwal}\n\nTerima kasih.' + TTD },
 ];

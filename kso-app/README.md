@@ -1,23 +1,28 @@
-# Monitoring KSO SPBU
+# Target KSO TAC — SPBU DODO
 
-Aplikasi web (mobile-first) untuk **monitoring & tindak lanjut kerja sama operasi (KSO) SPBU**, dengan konsep **WhatsApp langsung** dan **pustaka materi**. Bagian dari repo Task Force Audit SPBU, tetapi berdiri sendiri (build & deploy terpisah).
+Aplikasi web (mobile-first) untuk memantau **target kerja sama SPBU DODO dengan skema KSO TAC**: dari plan sosialisasi sampai Go Live, dengan **WhatsApp langsung** ke PIC SPBU / SBM dan **pustaka materi**. Berdiri sendiri di repo Task Force Audit SPBU (build & deploy terpisah).
+
+## Struktur data = Excel "Target KSO"
+Kolom: No, Region, Sales Area, No. SPBU, Kota/Kab., Provinsi, Rata-rata Omzet (KL/hari), Grading Pertamina Way, SBM, Kontak SBM, Nama/Nomor PIC SPBU, Prioritas, PIC Pertare, **Tanggal Pelaksanaan** (Plan Sosialisasi & Survey → Sosialisasi & Survey → Penawaran Sharing → Negosiasi → BAK & PKS → Go Live), Keterangan.
+Nilai tahapan boleh tanggal, `done`, atau teks (mis. `28% PTPR`).
 
 ## Fitur
-- **SPBU KSO**: nomor, mitra, PIC + no. WA, lokasi, masa kontrak (peringatan ≤ N hari), target volume/bulan. Status kesehatan otomatis (TL terlambat, capaian volume, setoran, kontrak).
-- **Monitoring bulanan**: realisasi vs target (KL), capaian %, status setoran/bagi hasil, nilai audit; grafik 12 bulan.
-- **Tindak lanjut**: kategori, prioritas, tenggat, status (Belum/Proses/Selesai), PIC, sumber temuan, riwayat catatan & perubahan status. Filter + unduh CSV.
-- **WA langsung**: tombol WA di setiap SPBU/temuan membuka composer — pilih template, pesan terisi otomatis (`{pic}`, `{judul}`, `{tenggat}`, `{daftar}`, `{capaian}` …), bisa diedit, lalu dibuka di WhatsApp (`wa.me`). Setiap kiriman tercatat di tab **Komunikasi**. Kirim ke banyak SPBU lewat antrian berurutan (WhatsApp tidak mengizinkan broadcast otomatis).
-- **Materi**: unggah file (PDF/gambar/video/dokumen) atau simpan link. Kirim ke SPBU: di HP file dibagikan lewat menu Bagikan (Web Share) bersama pesannya; di desktop file diunduh lalu WhatsApp dibuka.
-- **Pengaturan**: identitas pengirim, template WA (bisa diubah/ditambah), cadangan & pemulihan JSON (termasuk file materi), rekap CSV.
+- **Impor Excel** (.xlsx, tanpa library — `src/lib/xlsx.js`); impor ulang menggabungkan berdasarkan No. SPBU, riwayat & jadwal tetap.
+- **Ekspor Excel** dengan tata letak yang sama + kolom Status & Tindak lanjut + baris total.
+- **Beranda**: jumlah per tahapan (sama dengan baris total Excel), status owner (Proses / Mempertimbangkan / Menunggu tanggapan / Belum berminat / Tidak dilanjutkan / Go Live), tindak lanjut terlambat, plan sosialisasi yang lewat, target belum dijadwalkan, rekap per kota.
+- **Target**: filter status/tahapan/prioritas/kota/grading, urut prioritas/omzet/jadwal; detail dengan stepper tahapan (ketuk untuk isi), status & keterangan, jadwal tindak lanjut, riwayat aktivitas.
+- **WA langsung** ke PIC SPBU atau SBM dengan template (perkenalan, jadwal sosialisasi, kirim materi, follow-up penawaran, minta bantuan SBM, update ke SBM). Setiap kiriman tercatat. WA berurutan untuk banyak SPBU.
+- **Materi**: file (dibagikan via menu Bagikan di HP) atau link; kirim ke satu/banyak SPBU.
+- Status owner diisi otomatis dari Keterangan saat impor (mis. "belum berminat" → Belum berminat).
 
-Data tersimpan di perangkat (IndexedDB `monitoring-kso`) — belum ada sinkron cloud.
+Data tersimpan di perangkat (IndexedDB `kso-tac-target`); file Excel sumber **tidak** disimpan di repo (berisi nomor HP).
 
 ## Menjalankan
 ```bash
 cd kso-app
 npm install
-npm run dev      # pengembangan
-npm test         # uji logika (node:test)
-npm run build    # hasil di dist/
+npm run dev
+npm test
+npm run build
 ```
-Deploy: Cloudflare Workers static assets (`npx wrangler deploy`, nama `task-force-kso-app`) atau hosting statis apa pun dari `dist/`.
+Deploy: Vercel proyek `monitoring-kso-spbu` (root `kso-app`) atau `npx wrangler deploy`.

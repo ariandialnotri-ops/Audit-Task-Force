@@ -126,9 +126,9 @@ Sejak commit kedua, desain mengikuti design system **AeroShift SPBU** (spesifika
 - Radius: 16px kartu standar, 24px hero/modal, pill (9999px) untuk tombol & dock navigasi bawah yang kini mengambang (floating dock), bukan menempel penuh di tepi layar.
 - Semua perubahan ini murni di lapisan CSS + dua fungsi pemetaan warna (`complianceBand()`, `classificationBadge()`) di `index.html`. Struktur HTML, data model, dan seluruh logika skoring/klasifikasi tidak diubah.
 
-## Aplikasi terpisah: Monitoring KSO SPBU (`kso-app/`)
+## Aplikasi terpisah: Target KSO TAC — SPBU DODO (`kso-app/`)
 
-- Proyek Vite vanilla JS sendiri (`kso-app/package.json`, build/test/deploy terpisah; Worker static assets `task-force-kso-app`). Tidak berbagi kode/data dengan aplikasi audit.
-- `src/lib/kso.js` logika murni (status kontrak, keterlambatan, capaian volume, kesehatan SPBU, CSV) + `src/lib/wa.js` (normalisasi nomor 62…, template `{placeholder}`, `wa.me`). Diuji di `kso-app/tests/`.
-- `src/lib/store.js`: IndexedDB `monitoring-kso` (store `kv` = state JSON, `files` = Blob materi). State: `spbu[] (log[])`, `monitoring[]`, `followups[] (log[])`, `materi[]`, `templates|null` (null = bawaan `DEFAULT_TEMPLATES`), `settings`.
-- WA: composer (`waCompose`) mencatat setiap kiriman ke `log` (type `wa`); banyak SPBU = antrian `waQueue` (tanpa broadcast). File materi dibagikan via Web Share API bila didukung.
+- Pipeline akuisisi kerja sama SPBU DODO dengan skema KSO TAC (bukan monitoring kinerja). Proyek Vite vanilla JS sendiri (`kso-app/package.json`); deploy Vercel proyek `monitoring-kso-spbu` (root `kso-app`, https://monitoring-kso-spbu.vercel.app) atau Worker static `task-force-kso-app`.
+- Struktur data mengikuti Excel `Target_KSO_Rian_*.xlsx` dari Rian (tidak disimpan di repo — berisi nomor HP): header baris 2, "Tanggal Pelaksanaan" & "Keterangan" di baris 1, baris total di akhir. 6 milestone `MILESTONES` (plan, sosialisasi, penawaran [teks, mis. "28% PTPR"], negosiasi, bak, golive); nilai = 'YYYY-MM-DD' | 'done' | teks.
+- `src/lib/pipeline.js` logika murni (tahapan, status owner `inferStatus()` dari Keterangan, plan lewat, jadwal tindak lanjut, `summary().funnel` = baris total Excel). `src/lib/target-io.js` impor/ekspor (gabung per No. SPBU). `src/lib/xlsx.js` baca/tulis XLSX tanpa dependensi (DecompressionStream + ZIP STORE `zip.js`). `src/lib/wa.js` template WA (`untuk`: pic/sbm/materi). Diuji di `kso-app/tests/`.
+- Penyimpanan: IndexedDB `kso-tac-target` (`kv` state `{targets, materi, templates|null, settings}`, `files` Blob materi). Setiap kiriman WA/materi & perubahan tahapan dicatat di `target.log`.
