@@ -125,3 +125,10 @@ Sejak commit kedua, desain mengikuti design system **AeroShift SPBU** (spesifika
 - Tipografi: Plus Jakarta Sans untuk UI, JetBrains Mono untuk semua angka/skor/kode item/tabel (alignment tabular).
 - Radius: 16px kartu standar, 24px hero/modal, pill (9999px) untuk tombol & dock navigasi bawah yang kini mengambang (floating dock), bukan menempel penuh di tepi layar.
 - Semua perubahan ini murni di lapisan CSS + dua fungsi pemetaan warna (`complianceBand()`, `classificationBadge()`) di `index.html`. Struktur HTML, data model, dan seluruh logika skoring/klasifikasi tidak diubah.
+
+## Aplikasi terpisah: Monitoring KSO SPBU (`kso-app/`)
+
+- Proyek Vite vanilla JS sendiri (`kso-app/package.json`, build/test/deploy terpisah; Worker static assets `task-force-kso-app`). Tidak berbagi kode/data dengan aplikasi audit.
+- `src/lib/kso.js` logika murni (status kontrak, keterlambatan, capaian volume, kesehatan SPBU, CSV) + `src/lib/wa.js` (normalisasi nomor 62…, template `{placeholder}`, `wa.me`). Diuji di `kso-app/tests/`.
+- `src/lib/store.js`: IndexedDB `monitoring-kso` (store `kv` = state JSON, `files` = Blob materi). State: `spbu[] (log[])`, `monitoring[]`, `followups[] (log[])`, `materi[]`, `templates|null` (null = bawaan `DEFAULT_TEMPLATES`), `settings`.
+- WA: composer (`waCompose`) mencatat setiap kiriman ke `log` (type `wa`); banyak SPBU = antrian `waQueue` (tanpa broadcast). File materi dibagikan via Web Share API bila didukung.
